@@ -162,3 +162,10 @@ Run it daily after M4. Each evening, one line: did the brief fit the day, and wh
 - Voice capture, weekly/monthly reviews, calibration nudges
 - Notifications, calendar sync, agentic hand-off
 - Accounts, device sync, pricing, the free-tier task cap
+
+## Git workflow
+
+- Never commit to main. Work on a branch named `feat/<milestone>-<slug>`.
+- Small conventional commits (`feat:`, `fix:`, `chore:`). Run build before each commit.
+- Build one milestone at a time; stop and summarise when its "Done when" is met.
+- Never merge into main yourself. I review and merge.
