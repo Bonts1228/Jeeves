@@ -21,8 +21,16 @@ describe('Backlog numbers', () => {
     expect(periodStart('month', now)).toEqual(new Date(2026, 9, 1))
   })
 
-  it('lifting shows 0 of 5 this week: nothing logs block completions until M4', () => {
+  it('lifting counts its ticked blocks this week', () => {
     expect(goalNumber(goal('goal-lifting'), seed.tasks, [], now)).toBe('0 of 5 this week')
+    const logs = [log('goal-lifting', 11, { blockId: 'sat' }), log('goal-lifting', 13, { blockId: 'tue' })]
+    expect(goalNumber(goal('goal-lifting'), seed.tasks, logs, now)).toBe('1 of 5 this week')
+  })
+
+  it('counts the whole period, so an entry a moment after the display clock still counts', () => {
+    const justTicked = log('goal-job', 15, { completedAt: new Date(now.getTime() + 20_000).toISOString() })
+    const nextWeek = log('goal-job', 19)
+    expect(goalNumber(goal('goal-job'), seed.tasks, [justTicked, nextWeek], now)).toBe('1 of 20 this week')
   })
 
   it('a set path counts its steps', () => {

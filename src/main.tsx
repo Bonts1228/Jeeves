@@ -7,6 +7,7 @@ import './index.css'
 import { setupPwaUpdates } from './lib/pwa-update'
 import { Backlog } from './screens/Backlog'
 import { Brief } from './screens/Brief'
+import { Focus } from './screens/Focus'
 import { Inbox } from './screens/Inbox'
 import { GoalScreen, ProjectScreen } from './screens/ListScreens'
 import { Plan } from './screens/Plan'
@@ -22,6 +23,7 @@ const router = createBrowserRouter([
     ],
   },
   { path: '/brief', element: <Brief /> },
+  { path: '/block/:id', element: <Focus /> },
   { path: '/settings', element: <Settings /> },
   { path: '/goals/:id', element: <GoalScreen /> },
   { path: '/projects/:id', element: <ProjectScreen /> },

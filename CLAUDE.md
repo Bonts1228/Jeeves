@@ -140,6 +140,15 @@ Clarified in M3 (`src/lib/brief.ts`):
 - **Over capacity:** a task that would go past the cap is skipped and filling continues with smaller, lower-ranked tasks. Tier 1–4 tasks left out show under Not placed with the reason; tier 5 leftovers don't.
 - **Refill** only adds into the room left and never moves what's placed. Tasks removed at review (×) go back to the Backlog and stay out of refills for that date. Brief state (`builtAt`, `confirmedAt`, `removed`) lives in `meta` under `brief:<date>`.
 
+Clarified in M4 (`src/lib/day.ts`):
+
+- **Order within a block** is derived, never stored: the brief's tiers (overdue — known by its reason, carried-from-today after older days — then due ascending, recurring count goals, path steps by path deadline/title/`order`, then oldest). Open tasks first, done ones after. No reorder: every task has its own Done tick, and the current task is the first open one.
+- **Up next** (today's non-protected blocks; a block has work if it has an open task or an unticked block goal): the current block with work, else the next later block with work (start early allowed), else leftovers from ended blocks, else "Today's done". Nothing dated today and no `brief:<today>` → "Plan today" (Brief review with `?date=today`).
+- **Start block** only opens the Focus view. **Time left** is wall clock to the block's end; nothing is stored, and a block never started changes nothing.
+- **Block goals:** the block tick writes the goal's LogEntry (at most one per block; untick removes it). A task for a `servedByBlocks` goal done inside a block of that goal's area logs without `goalId` (the block tick covers it); done anywhere else it counts.
+- **Progress** counts entries in the whole current period (period start to the next period's start).
+- **Undo:** each tick shows an Undo banner for a few seconds; tapping a filled tick undoes it any time.
+
 Other rules:
 
 - **Repeating tasks:** ticking done creates the next occurrence: a copy with a new id, `status: 'backlog'`, `rollovers: 0`, and `due` set to completion date + N days (`every`), or the given weekday strictly after the later of completion date and old due date (`weekly`, so finishing Sat for a Sun task goes to the following Sun). Only done creates the next one. Delete ends the series, and Back to Backlog keeps the same occurrence. A task has at most one next occurrence (`prevId`), so ticking twice or tick → undo → tick never duplicates. **Undo done** reopens the task (`scheduled` if it has a date, else `backlog`), removes its latest LogEntry, and removes the next occurrence if it is still open (a done or deleted one stays). Repeating tasks enter the brief only through rules 2.1/2.2. Reason shows the cadence: "Due Sun · weekly".
@@ -205,6 +214,7 @@ Not approved for building. Recorded so they aren't lost.
 
 **Candidates, not yet approved**
 - Design pass after M4: visual polish across all screens.
+- Do now / reorder within a block: today a block's order is derived from the brief's tiers.
 - Several steps per path per day: a per-goal/project setting so a short next step can follow one already placed that day (today the brief adds one step per path per day).
 - Project end date.
 - Follow-up nudges: ticking an outreach task creates a follow-up due in N days, cancelled if the outreach is marked replied.

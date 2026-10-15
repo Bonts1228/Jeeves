@@ -148,4 +148,21 @@ describe('completeTask logging', () => {
     expect((await db.logEntries.toArray())[0].details).toEqual({ role: 'Analyst', company: 'Acme' })
     expect(await db.tasks.count()).toBe(1)
   })
+
+  it('a task for a goal served by blocks counts only when done outside a block of its area', async () => {
+    await db.goals.add({ id: 'lift', title: 'Lifting', type: 'recurring', areaId: 'area-gym', target: 5, period: 'week', servedByBlocks: true })
+    const base = { date: '2026-10-13', protected: false, start: '17:30', end: '19:00' }
+    await db.blocks.bulkAdd([
+      { id: 'gym', areaId: 'area-gym', ...base },
+      { id: 'focus', areaId: 'area-focus', ...base, start: '08:00', end: '12:00' },
+    ])
+    await db.tasks.bulkAdd([
+      task({ id: 'in-gym', goalId: 'lift', status: 'scheduled', date: '2026-10-13', blockId: 'gym' }),
+      task({ id: 'in-focus', goalId: 'lift', status: 'scheduled', date: '2026-10-13', blockId: 'focus' }),
+      task({ id: 'unscheduled', goalId: 'lift' }),
+    ])
+    for (const id of ['in-gym', 'in-focus', 'unscheduled']) await completeTask(id, { now: oct(13), db })
+    const goals = Object.fromEntries((await db.logEntries.toArray()).map((e) => [e.taskId, e.goalId]))
+    expect(goals).toEqual({ 'in-gym': undefined, 'in-focus': 'lift', unscheduled: 'lift' })
+  })
 })

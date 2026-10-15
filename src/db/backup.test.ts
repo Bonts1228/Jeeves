@@ -2,6 +2,7 @@ import 'fake-indexeddb/auto'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { DATA_TABLES, exportData, type ExportFile, importData, lastExport, parseImport } from './backup'
 import { ensureBlocks, scheduleNewTask } from './blocks'
+import { tickBlock } from './day'
 import { BriefDB, newId, SETTINGS_KEY } from './db'
 import { SCHEMA_VERSION } from './migrations'
 import { seed } from './seed'
@@ -15,7 +16,8 @@ async function snapshot() {
   return { settings: await db.settings.get(SETTINGS_KEY), tables }
 }
 
-// A device with more than the seed: inbox, generated and one-off blocks, done tasks, logs, a repeat chain
+// A device with more than the seed: inbox, generated and one-off blocks, done tasks, logs (incl. a
+// block tick), a repeat chain
 async function lived() {
   await seed(db, now)
   await db.inbox.add({ id: 'in1', text: 'Call the bank', createdAt: now.toISOString() })
@@ -28,6 +30,7 @@ async function lived() {
   await addTask({ ...oneOff, id: newId(), title: 'Ask Sam for referral', projectId: 'proj-job-setup' }, { db })
   const stamps = { ...oneOff, id: newId(), title: 'Buy stamps' }
   await scheduleNewTask(stamps, '2026-10-16', { newBlock: { start: '12:00', end: '12:30', areaId: 'area-focus' } }, { now, db })
+  await tickBlock('tpl-5-3@2026-10-16', { now, db }) // Fri's Gym block: a log entry with blockId, no taskId
 }
 
 beforeEach(async () => {

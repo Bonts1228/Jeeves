@@ -57,6 +57,13 @@ function shortDay(date: ISODate, from: ISODate): string {
   return dayMonth(date)
 }
 
+// The reasons rule 2.1 gives. A placed task keeps its reason, so the day view can still tell it was
+// overdue when the brief ranked it (lib/day.ts orders a block's tasks by the brief's tiers).
+const CARRIED = 'Carried from today'
+const OVERDUE = 'Overdue from '
+export const isOverdueReason = (reason?: string) => reason === CARRIED || !!reason?.startsWith(OVERDUE)
+export const isCarriedReason = (reason?: string) => reason === CARRIED
+
 const cadence = (r: Repeat) => (r.kind === 'weekly' ? 'weekly' : `every ${r.days} day${r.days === 1 ? '' : 's'}`)
 
 const byOrder = (a: Task, b: Task) => (a.order ?? Infinity) - (b.order ?? Infinity) || a.createdAt.localeCompare(b.createdAt)
@@ -84,7 +91,7 @@ export function rankCandidates(input: BriefInput): Candidate[] {
   tasks
     .filter((t) => t.status === 'scheduled' && t.date! < date)
     .sort((a, b) => a.date!.localeCompare(b.date!) || oldestFirst(a, b))
-    .forEach((t) => add(t, t.date === today ? 'Carried from today' : `Overdue from ${shortDay(t.date!, today)}`, 1))
+    .forEach((t) => add(t, t.date === today ? CARRIED : `${OVERDUE}${shortDay(t.date!, today)}`, 1))
 
   // 2. Due by the date, earliest first. Repeating tasks show their cadence.
   backlog

@@ -1,6 +1,6 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { type ReactNode, useEffect, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { BackIcon } from '../components/icons'
 import { Sheet } from '../components/Sheet'
 import { SchedulePicker } from '../components/TaskFields'
@@ -15,11 +15,14 @@ import type { Area, ID, ISODate, Task } from '../types'
 
 // Brief review: tomorrow's tasks by block, a reason under each, remove (×), add from the Backlog,
 // Confirm. The first visit builds the brief; Refill adds what fits in the room left.
+// ?date=today plans today instead (Home's "Plan today" on a day with no brief), from now on.
 export function Brief() {
   const navigate = useNavigate()
+  const [params] = useSearchParams()
   const [now] = useState(() => new Date())
   const today = isoDate(now)
-  const date = addDays(today, 1)
+  const forToday = params.get('date') === 'today'
+  const date = forToday ? today : addDays(today, 1)
   const [ready, setReady] = useState(false)
   const [adding, setAdding] = useState<Task | 'pick' | null>(null)
 
@@ -62,7 +65,7 @@ export function Brief() {
       </p>
 
       <ul className="space-y-3">
-        {sorted.length === 0 && <li className="text-stone-500">No blocks tomorrow.</li>}
+        {sorted.length === 0 && <li className="text-stone-500">No blocks {forToday ? 'today' : 'tomorrow'}.</li>}
         {sorted.map((b) => {
           const inBlock = tasks.filter((t) => t.blockId === b.id)
           const free = blockMinutes(b) - inBlock.reduce((sum, t) => sum + t.estimate, 0)

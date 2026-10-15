@@ -83,16 +83,23 @@ const sameRepeat = (a?: Repeat, b?: Repeat) => JSON.stringify(a) === JSON.string
 // Ticking done is the only completion signal. Writes a LogEntry against the task's goal (or its
 // project's goal) and, for a repeating task, creates the next occurrence. A task has at most one
 // next occurrence (linked by prevId), so completing twice or complete → undo → complete never duplicates.
+// A goal served by blocks counts its blocks: a task done in one of its area's blocks is covered by
+// the block tick, so its entry doesn't count against the goal. Done anywhere else, it counts.
 export async function completeTask(
   id: ID,
   { details, now = new Date(), db = defaultDb }: { details?: Record<string, string>; now?: Date; db?: BriefDB } = {},
 ) {
-  await db.transaction('rw', [db.tasks, db.logEntries, db.goals, db.projects], async () => {
+  await db.transaction('rw', [db.tasks, db.logEntries, db.goals, db.projects, db.blocks], async () => {
     const task = await db.tasks.get(id)
     if (!task || task.status === 'done' || task.status === 'deleted') return
 
     const project = task.projectId ? await db.projects.get(task.projectId) : undefined
-    const goalId = task.goalId ?? project?.goalId
+    let goalId = task.goalId ?? project?.goalId
+    const goal = goalId ? await db.goals.get(goalId) : undefined
+    if (goal?.servedByBlocks && task.status === 'scheduled' && task.blockId) {
+      const block = await db.blocks.get(task.blockId)
+      if (block?.areaId === goal.areaId) goalId = undefined
+    }
     await db.tasks.update(id, { status: 'done' })
     await db.logEntries.add({
       id: newId(),
