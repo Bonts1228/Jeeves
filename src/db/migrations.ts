@@ -2,7 +2,7 @@
 // (backup.ts), so an old phone database and an old file take the same path.
 
 // The Dexie schema version. Exports carry it; bump it with every db.version().
-export const SCHEMA_VERSION = 3
+export const SCHEMA_VERSION = 4
 
 type Row = Record<string, unknown>
 
@@ -12,7 +12,7 @@ export function goalToV2(goal: Row) {
 }
 
 // Upgrade exported tables in place from fromVersion to SCHEMA_VERSION.
-// v3 only added the meta table, which exports don't carry.
+// v3 only added the meta table, which exports don't carry; v4 only added optional project fields.
 export function migrateTables(tables: Record<string, Row[]>, fromVersion: number) {
   if (fromVersion < 2) tables.goals.forEach(goalToV2)
 }

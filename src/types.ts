@@ -55,6 +55,8 @@ export interface Project {
   areaId: ID
   goalId?: ID // done steps log against this goal
   manualOnly?: boolean // e.g. Housekeeping: never auto-placed unless due or overdue
+  notBefore?: ISODate // held back until this date
+  startsAfterProjectId?: ID // held back until that project's steps are all done or deleted; then cleared
 }
 
 export type Repeat =

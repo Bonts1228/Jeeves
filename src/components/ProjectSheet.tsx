@@ -2,6 +2,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { useState } from 'react'
 import { db, newId } from '../db/db'
 import { saveProject } from '../db/goals'
+import { hasOpenSteps, waitCandidates } from '../lib/holdback'
 import type { Project } from '../types'
 import { DeleteListConfirm } from './DeleteListConfirm'
 import { Field } from './GoalSheet'
@@ -19,9 +20,11 @@ export function ProjectSheet({
 }) {
   const areas = useLiveQuery(() => db.areas.toArray())
   const goals = useLiveQuery(() => db.goals.toArray())
+  const projects = useLiveQuery(() => db.projects.toArray())
+  const openTasks = useLiveQuery(() => db.tasks.where('status').anyOf('backlog', 'scheduled').toArray())
   const [draft, setDraft] = useState<Omit<Project, 'id'>>(() => project ?? { title: '', areaId: '' })
   const [deleting, setDeleting] = useState(false)
-  if (!areas || !goals) return null
+  if (!areas || !goals || !projects || !openTasks) return null
 
   const set = (patch: Partial<Project>) => setDraft((d) => ({ ...d, ...patch }))
   const areaId = draft.areaId || areas[0]?.id
@@ -36,6 +39,8 @@ export function ProjectSheet({
       areaId: areaId!,
       ...(draft.goalId && { goalId: draft.goalId }),
       ...(draft.manualOnly && { manualOnly: true }),
+      ...(draft.notBefore && { notBefore: draft.notBefore }),
+      ...(draft.startsAfterProjectId && { startsAfterProjectId: draft.startsAfterProjectId }),
     })
     onClose()
   }
@@ -94,6 +99,38 @@ export function ProjectSheet({
               </span>
             </span>
           </label>
+          <Field label="Not before (optional)" hint="Held back under Later until this date.">
+            <div className="flex gap-2">
+              <input
+                type="date"
+                className={`${input} flex-1`}
+                value={draft.notBefore ?? ''}
+                onChange={(e) => set({ notBefore: e.target.value || undefined })}
+              />
+              {draft.notBefore && (
+                <button type="button" className={secondaryBtn} onClick={() => set({ notBefore: undefined })}>
+                  Clear
+                </button>
+              )}
+            </div>
+          </Field>
+          <Field label="Starts after (optional)" hint="Held back under Later until that project's steps are all done.">
+            <select
+              className={input}
+              value={draft.startsAfterProjectId ?? ''}
+              onChange={(e) => set({ startsAfterProjectId: e.target.value || undefined })}
+            >
+              <option value="">None</option>
+              {waitCandidates(project?.id, projects).map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.title}
+                </option>
+              ))}
+            </select>
+          </Field>
+          {draft.startsAfterProjectId && !hasOpenSteps(draft.startsAfterProjectId, openTasks) && (
+            <p className="text-sm text-amber-700">It has nothing open, so this project starts now.</p>
+          )}
           {toggledManual && (
             <p className="text-sm text-amber-700">
               {draft.manualOnly ? 'Its steps lose their order.' : 'Its tasks become steps, oldest first.'}

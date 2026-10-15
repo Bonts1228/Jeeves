@@ -284,7 +284,8 @@ function RepeatPicker({ repeat, onChange }: { repeat?: Repeat; onChange: (r: Rep
 
 // Pick a day, then a block with room or a new one-off block. Only free room is offered: nothing
 // already scheduled moves. A chosen block that stops fitting is dropped with a prompt to pick again.
-function SchedulePicker({
+// dates: the days on offer (default today and tomorrow); given, the picker can't be cleared.
+export function SchedulePicker({
   schedule,
   estimate,
   areaId,
@@ -292,6 +293,7 @@ function SchedulePicker({
   areas,
   today,
   task,
+  dates: fixedDates,
   onChange,
 }: {
   schedule: ScheduleDraft | null
@@ -301,11 +303,12 @@ function SchedulePicker({
   areas: Area[]
   today: ISODate
   task?: Task
+  dates?: ISODate[]
   onChange: (s: ScheduleDraft | null) => void
 }) {
   const date = schedule?.date ?? today
   const current = task?.status === 'scheduled' ? task : undefined
-  const dates = [...new Set([today, addDays(today, 1), ...(current?.date ? [current.date] : [])])].sort()
+  const dates = fixedDates ?? [...new Set([today, addDays(today, 1), ...(current?.date ? [current.date] : [])])].sort()
   const [options, setOptions] = useState<BlockWithRoom[] | null>(null)
   const [dayBlocks, setDayBlocks] = useState<Block[]>([])
   const [newBlock, setNewBlock] = useState({ start: '', end: '' })
@@ -371,7 +374,7 @@ function SchedulePicker({
             {capitalise(dayLabel(d, today))}
           </Option>
         ))}
-        {schedule && (
+        {schedule && !fixedDates && (
           <button type="button" className="ml-auto h-11 px-3 text-sm text-stone-600" onClick={() => onChange(null)}>
             {current ? 'Back to Backlog' : "Don't schedule"}
           </button>

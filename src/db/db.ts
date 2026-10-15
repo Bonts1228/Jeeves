@@ -50,6 +50,9 @@ export class BriefDB extends Dexie {
       .upgrade((tx) => tx.table('goals').toCollection().modify(goalToV2))
     // v3: device facts like the last export time, kept out of the data tables and exports
     this.version(3).stores({ meta: '' })
+    // v4: project hold-back. New fields are optional, so rows need no upgrade; the index finds the
+    // projects waiting on one.
+    this.version(4).stores({ projects: 'id, areaId, startsAfterProjectId' })
   }
 }
 

@@ -3,6 +3,7 @@ import { nextDue } from '../lib/repeat'
 import type { ID, Repeat, Task } from '../types'
 import { ensureBlocks, resolvePlacement, type Schedule } from './blocks'
 import { type BriefDB, db as defaultDb, newId } from './db'
+import { releaseWaiting } from './goals'
 import { renumber, sameList, stepListOf } from './steps'
 
 // Add a new Backlog task (a new step goes last). inboxId: the Inbox item it came from, removed in
@@ -65,6 +66,7 @@ export async function updateTask(
       await renumber(db, fromList)
       await renumber(db, toList)
     }
+    if ('projectId' in patch && patch.projectId !== task.projectId) await releaseWaiting(db, task.projectId)
 
     if ('repeat' in patch && !sameRepeat(patch.repeat, task.repeat)) {
       for (let next = await successor(db, id); next; next = await successor(db, next.id))
@@ -100,23 +102,28 @@ export async function completeTask(
       ...(details && { details }),
     })
 
-    if (!task.repeat || (await db.tasks.where('prevId').equals(id).count()) > 0) return
-    const next: Task = {
-      ...task,
-      id: newId(),
-      prevId: id,
-      status: 'backlog',
-      due: nextDue(task.repeat, isoDate(now), task.due),
-      rollovers: 0,
-      createdAt: now.toISOString(),
-    }
-    delete next.date
-    delete next.blockId
-    delete next.reason
-    delete next.order // a repeating step's next occurrence goes last
-    await db.tasks.add(next)
-    await renumber(db, stepListOf(next))
+    if (task.repeat && (await db.tasks.where('prevId').equals(id).count()) === 0) await addNext(db, task, task.repeat, now)
+    await releaseWaiting(db, task.projectId)
   })
+}
+
+// The next occurrence of a repeating task just ticked done.
+async function addNext(db: BriefDB, task: Task, repeat: Repeat, now: Date) {
+  const next: Task = {
+    ...task,
+    id: newId(),
+    prevId: task.id,
+    status: 'backlog',
+    due: nextDue(repeat, isoDate(now), task.due),
+    rollovers: 0,
+    createdAt: now.toISOString(),
+  }
+  delete next.date
+  delete next.blockId
+  delete next.reason
+  delete next.order // a repeating step's next occurrence goes last
+  await db.tasks.add(next)
+  await renumber(db, stepListOf(next))
 }
 
 // Undo a tick: reopen the task, drop its LogEntry, and remove the next occurrence if it's still open.
@@ -146,5 +153,6 @@ export async function deleteTask(id: ID, db: BriefDB = defaultDb) {
     if (!task) return
     await db.tasks.update(id, { status: 'deleted', order: undefined })
     await renumber(db, stepListOf(task))
+    await releaseWaiting(db, task.projectId)
   })
 }

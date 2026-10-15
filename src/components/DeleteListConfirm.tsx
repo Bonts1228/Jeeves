@@ -32,7 +32,7 @@ export function DeleteListConfirm({
     await deleteGoalOrProject(kind, id, mode)
     onDeleted()
   }
-  const { open, done, projects } = affected
+  const { open, done, projects, waiting } = affected
 
   return (
     <div className="space-y-3 rounded-xl bg-red-50 p-3 text-red-900">
@@ -43,7 +43,8 @@ export function DeleteListConfirm({
         {open > 0 && <li>{plural(open, 'open task')}: keep them in the Backlog or delete them too.</li>}
         {done > 0 && <li>{plural(done, 'done task')} {done === 1 ? 'stays' : 'stay'} as history.</li>}
         {projects > 0 && <li>{plural(projects, 'project')} will stop feeding this goal.</li>}
-        {open + done + projects === 0 && <li>Nothing else is linked to it.</li>}
+        {waiting > 0 && <li>{plural(waiting, 'project')} waiting on it will start now.</li>}
+        {open + done + projects + waiting === 0 && <li>Nothing else is linked to it.</li>}
       </ul>
       <div className="flex flex-col gap-2">
         {open > 0 ? (

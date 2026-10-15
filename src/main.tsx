@@ -6,6 +6,7 @@ import { ensureSeeded } from './db/seed'
 import './index.css'
 import { setupPwaUpdates } from './lib/pwa-update'
 import { Backlog } from './screens/Backlog'
+import { Brief } from './screens/Brief'
 import { Inbox } from './screens/Inbox'
 import { GoalScreen, ProjectScreen } from './screens/ListScreens'
 import { Plan } from './screens/Plan'
@@ -20,6 +21,7 @@ const router = createBrowserRouter([
       { path: '/inbox', element: <Inbox /> },
     ],
   },
+  { path: '/brief', element: <Brief /> },
   { path: '/settings', element: <Settings /> },
   { path: '/goals/:id', element: <GoalScreen /> },
   { path: '/projects/:id', element: <ProjectScreen /> },

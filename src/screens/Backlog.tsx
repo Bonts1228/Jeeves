@@ -7,6 +7,7 @@ import { TaskSheet } from '../components/TaskSheet'
 import { secondaryBtn } from '../components/ui'
 import { db } from '../db/db'
 import { isoDate } from '../lib/dates'
+import { heldBackLabel, isHeldBack } from '../lib/holdback'
 import { goalNumber, nextStep, projectNumber } from '../lib/progress'
 import { taskFacts } from '../lib/task-fields'
 import type { Goal, GoalType, Task } from '../types'
@@ -17,7 +18,7 @@ const GOAL_TYPE: Record<GoalType, string> = {
   recurring: 'Recurring',
 }
 
-// Inbox count, goals and projects as numbers, then loose tasks. Goals and projects open their own
+// Inbox count, goals and projects as numbers, then loose tasks, then held-back projects (Later). Goals and projects open their own
 // screens; loose tasks open for editing here.
 export function Backlog() {
   const [editing, setEditing] = useState<string | null>(null)
@@ -36,6 +37,7 @@ export function Backlog() {
   const isOpen = (t: Task) => t.status !== 'done'
   const loose = tasks.filter((t) => isOpen(t) && !t.goalId && !t.projectId)
   const areaName = (id: string) => areas.find((a) => a.id === id)?.name ?? 'area'
+  const later = projects.filter((p) => isHeldBack(p, today))
 
   const goalSub = (g: Goal) => {
     const own = tasks.filter((t) => t.goalId === g.id && !t.projectId)
@@ -62,7 +64,7 @@ export function Backlog() {
       </Group>
 
       <Group title="Projects">
-        {projects.map((p) => {
+        {projects.filter((p) => !isHeldBack(p, today)).map((p) => {
           const next = nextStep(tasks.filter((t) => t.projectId === p.id))
           return (
             <Row
@@ -89,6 +91,19 @@ export function Backlog() {
         <Group title={`Tasks · ${loose.length}`}>
           {loose.map((t) => (
             <Row key={t.id} title={t.title} sub={taskFacts(t, today)} onClick={() => setEditing(t.id)} />
+          ))}
+        </Group>
+      )}
+      {later.length > 0 && (
+        <Group title="Later">
+          {later.map((p) => (
+            <Row
+              key={p.id}
+              title={p.title}
+              sub={heldBackLabel(p, projects, tasks)}
+              value={projectNumber(p, tasks)}
+              to={`/projects/${p.id}`}
+            />
           ))}
         </Group>
       )}

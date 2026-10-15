@@ -75,6 +75,8 @@ interface Project {
   id: ID; title: string; areaId: ID;
   goalId?: ID;                              // done steps log against this goal
   manualOnly?: boolean;                     // e.g. Housekeeping: see "Manual-only projects"
+  notBefore?: ISODate;                      // held back until this date (never auto-cleared)
+  startsAfterProjectId?: ID;                // held back until that project has nothing open; then cleared
 }
 
 type Repeat =
@@ -124,18 +126,27 @@ interface InboxItem { id: ID; text: string; createdAt: string; }
    1. Overdue — reason "Overdue from Tue"
    2. Due by tomorrow — "Due Thu"
    3. Recurring count goals behind pace — "3 left this week" (`servedByBlocks` goals are served by their blocks, not tasks)
-   4. Next step of each set path or project, by `order` — "CFA: next unit" (skip manual-only projects)
+   4. Next step of each set path or project, by `order` — "CFA: next unit" (skip manual-only and held-back projects)
    5. Everything else in the Backlog, oldest first — "Waiting since 2 Oct" (skip manual-only project tasks and repeating tasks)
 3. **Fill blocks in time order.** A task goes in the first block of its area with room for its whole estimate. A manual-only project task goes in the first non-protected block of any area with room. Never split tasks.
 4. **Stop at capacity:** the lower of the day's capacity setting and total block time.
 5. **Save each placement** as `status: 'scheduled'` with `date`, `blockId`, `reason`.
+
+Clarified in M3 (`src/lib/brief.ts`):
+
+- **Overdue at brief time** is `scheduled` with `date` before the brief date, so today's leftovers count ("Carried from today"). Moving one onto the brief date increments `rollovers`.
+- **One step per path per day:** rule 2.4 skips a path that already has a step on the brief date. Rule 2.5 skips later steps of ordered lists (they wait their turn).
+- **No block for the task's area** (none that day, or only protected ones): the task is skipped, uses no capacity, and stays in the Backlog unchanged. Ranking carries on. Brief review lists it under **Not placed** ("No Gym block Thu") with **Add** (block picker + New block).
+- **Over capacity:** a task that would go past the cap is skipped and filling continues with smaller, lower-ranked tasks. Tier 1–4 tasks left out show under Not placed with the reason; tier 5 leftovers don't.
+- **Refill** only adds into the room left and never moves what's placed. Tasks removed at review (×) go back to the Backlog and stay out of refills for that date. Brief state (`builtAt`, `confirmedAt`, `removed`) lives in `meta` under `brief:<date>`.
 
 Other rules:
 
 - **Repeating tasks:** ticking done creates the next occurrence: a copy with a new id, `status: 'backlog'`, `rollovers: 0`, and `due` set to completion date + N days (`every`), or the given weekday strictly after the later of completion date and old due date (`weekly`, so finishing Sat for a Sun task goes to the following Sun). Only done creates the next one. Delete ends the series, and Back to Backlog keeps the same occurrence. A task has at most one next occurrence (`prevId`), so ticking twice or tick → undo → tick never duplicates. **Undo done** reopens the task (`scheduled` if it has a date, else `backlog`), removes its latest LogEntry, and removes the next occurrence if it is still open (a done or deleted one stays). Repeating tasks enter the brief only through rules 2.1/2.2. Reason shows the cadence: "Due Sun · weekly".
 - **Manual-only projects (Housekeeping):** life admin not tied to a goal. Their tasks are never auto-placed unless overdue or due by tomorrow. You add them yourself, at Brief review ("+ Add from Backlog") or on capture ("Schedule" chip: today/tomorrow + block). The picker lists every non-protected block that day with room for the whole estimate, any area, plus **New block** (start/end → one-off Block in the task's area, not protected). Reason: "Added by you". Manual adds may exceed capacity. Brief review then shows "n min over" and does not block.
 - **Step order:** a set-path goal's tasks and a non-manual project's tasks are ordered: every non-deleted step, done ones included, has `order` 1..n with no gaps or duplicates. New or moved-in steps go last; delete closes the gap; a done step keeps its place; a repeating step's next occurrence goes last. Reorder with ↑/↓ (swaps with the nearest open step). Other tasks have no `order`. Changing a goal's type or a project's manual-only flag renumbers: becoming ordered numbers steps oldest first, becoming unordered clears `order`.
-- **Deleting a goal or project** confirms first with counts: open tasks are kept as loose Backlog tasks or deleted, as chosen; done tasks stay as history, unlinked; projects feeding a deleted goal stay, unlinked. Log entries are never touched (nor by target/period edits: progress recomputes).
+- **Project hold-back:** a project is held back while `notBefore` is after the date (the brief date, or today in the Backlog) or while `startsAfterProjectId` is set. Held-back projects stay out of rules 2.3–2.5; their overdue and due steps still rank via 2.1/2.2, and you can add steps yourself. The Backlog shows them last under **Later** with why ("Not before 2 Nov", "After X"); if X has an open repeating step it shows "After X (X repeats, won't finish)" so you can clear the wait by hand. `startsAfterProjectId` clears when X's last open step is done, deleted or moved out, or X is deleted; saving it against an X with nothing open doesn't keep it; undo done doesn't bring it back. The picker leaves out the project itself, manual-only projects and anything that would form a loop. Import rejects a bad `notBefore`, a missing X, and loops of any length.
+- **Deleting a goal or project** confirms first with counts: open tasks are kept as loose Backlog tasks or deleted, as chosen; done tasks stay as history, unlinked; projects feeding a deleted goal stay, unlinked; projects waiting on a deleted project start. Log entries are never touched (nor by target/period edits: progress recomputes).
 - **Block goals:** each block in a `servedByBlocks` goal's area gets a Done tick (detail form first if the goal has `detailFields`). It writes a LogEntry with `blockId` and `goalId`.
 - **Unfinished at block end:** prompt per task with three buttons — **Next block** (same area), **Pick a block**, **Back to Backlog**. Each increments `rollovers`. Still unscheduled at end of day → Overdue.
 - **Overdue:** visible on Home; prompt to reschedule or delete.
@@ -156,7 +167,7 @@ Bottom bar on main screens: **Plan** · **+ (quick capture)** · **Backlog**.
 | Focus block | Block name and time left, goal link ("2 of 5 this week"), current task with Done, then the block's other tasks |
 | Unfinished prompt | Bottom sheet at block end: Next block / Pick a block / Back to Backlog |
 | Brief review | Tomorrow's tasks grouped by block, reason under each, remove (×), "+ Add from Backlog", Confirm brief |
-| Backlog | Inbox count, Goals with progress numbers, Projects with "n of m steps" |
+| Backlog | Inbox count, Goals with progress numbers, Projects with "n of m steps", held-back projects last under "Later" |
 | Capture | Bottom sheet: text input, chips for estimate / area / goal / due, To Inbox or Add to Backlog |
 | Settings | Brief time, capacity per weekday, areas, block templates, backup (export / import, last export date) |
 
@@ -193,8 +204,9 @@ Not approved for building. Recorded so they aren't lost.
 - Claude connection.
 
 **Candidates, not yet approved**
+- Design pass after M4: visual polish across all screens.
+- Several steps per path per day: a per-goal/project setting so a short next step can follow one already placed that day (today the brief adds one step per path per day).
 - Project end date.
-- Project start conditions: "starts after project X" or "not before <date>". Held-back projects show last in the Backlog under "Later".
 - Follow-up nudges: ticking an outreach task creates a follow-up due in N days, cancelled if the outreach is marked replied.
 
 ## Out of scope — do not build

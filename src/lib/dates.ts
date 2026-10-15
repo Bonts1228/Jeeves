@@ -28,3 +28,11 @@ export function weekdayOf(date: ISODate): Weekday {
 export function nextWeekday(date: ISODate, weekday: Weekday): ISODate {
   return addDays(date, ((weekday - weekdayOf(date) + 6) % 7) + 1)
 }
+
+const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+// "2 Oct"
+export function dayMonth(date: ISODate): string {
+  const d = parseISODate(date)
+  return `${d.getDate()} ${MONTH_SHORT[d.getMonth()]}`
+}

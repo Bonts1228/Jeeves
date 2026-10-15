@@ -1,16 +1,21 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
+import { briefState } from '../db/brief'
 import { db, SETTINGS_KEY } from '../db/db'
-import { blockMinutes, formatDuration, toMinutes } from '../lib/time'
+import { addDays, isoDate } from '../lib/dates'
+import { blockMinutes, formatDuration, minutesOfDay, toMinutes } from '../lib/time'
 import type { Weekday } from '../types'
 
-// M1: shows today's block templates. Brief and tasks come in M3/M4.
+// Today's block templates and the way into tomorrow's brief. The day view comes in M4.
 export function Plan() {
   const [today] = useState(() => new Date())
   const weekday = today.getDay() as Weekday
   const settings = useLiveQuery(() => db.settings.get(SETTINGS_KEY))
   const areas = useLiveQuery(() => db.areas.toArray())
   const templates = useLiveQuery(() => db.blockTemplates.where('weekday').equals(weekday).toArray(), [weekday])
+  const tomorrow = addDays(isoDate(today), 1)
+  const brief = useLiveQuery(() => briefState(tomorrow), [tomorrow])
 
   if (!settings || !areas || !templates) return null
 
@@ -18,8 +23,21 @@ export function Plan() {
   const blockTime = blocks.filter((b) => !b.protected).reduce((sum, b) => sum + blockMinutes(b), 0)
   const areaName = (id: string) => areas.find((a) => a.id === id)?.name ?? 'Unknown area'
 
+  const briefDue = minutesOfDay(today) >= toMinutes(settings.briefTime)
+
   return (
     <div className="space-y-4">
+      <Link
+        to="/brief"
+        className={`flex min-h-14 items-center justify-between rounded-xl px-4 ${
+          briefDue && !brief?.confirmedAt ? 'bg-stone-900 text-white active:bg-stone-700' : 'bg-white active:bg-stone-50'
+        }`}
+      >
+        <span className="font-medium">Tomorrow's brief</span>
+        <span className={`text-sm ${briefDue && !brief?.confirmedAt ? 'text-stone-300' : 'text-stone-500'}`}>
+          {brief?.confirmedAt ? 'Confirmed' : 'Review'}
+        </span>
+      </Link>
       <div>
         <p className="font-medium">
           {today.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'short' })}

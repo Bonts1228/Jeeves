@@ -1,3 +1,4 @@
+import { findWaitLoop } from '../lib/holdback'
 import type { Settings } from '../types'
 import { type BriefDB, db as defaultDb, LAST_EXPORT_KEY, SETTINGS_KEY } from './db'
 import { migrateTables, SCHEMA_VERSION } from './migrations'
@@ -90,6 +91,22 @@ function fits(value: unknown, check: Check) {
   return typeof value === check
 }
 
+// Project hold-back (v4): a real date, a project in the file, and no loop of waits (A → B → A).
+function checkHoldBack(projects: Row[]): string | null {
+  const ids = new Set(projects.map((p) => p.id))
+  const name = (id: unknown) => `“${projects.find((p) => p.id === id)?.title}”`
+  for (const p of projects) {
+    if (p.notBefore !== undefined && !(typeof p.notBefore === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(p.notBefore)))
+      return `Project ${name(p.id)} has an invalid notBefore.`
+    if (p.startsAfterProjectId !== undefined && !ids.has(p.startsAfterProjectId))
+      return `Project ${name(p.id)} waits on a project that isn't in the file.`
+  }
+  const loop = findWaitLoop(projects as { id: string; startsAfterProjectId?: string }[])
+  if (!loop) return null
+  if (loop.length === 1) return `Project ${name(loop[0])} waits on itself.`
+  return `Projects wait on each other in a loop: ${[...loop, loop[0]].map(name).join(' → ')}.`
+}
+
 const isObject = (v: unknown): v is Row => typeof v === 'object' && v !== null && !Array.isArray(v)
 
 export interface ImportSummary {
@@ -147,6 +164,9 @@ export function parseImport(text: string): ParsedImport {
     }
     tables[name] = structuredClone(rows)
   }
+
+  const holdBack = checkHoldBack(tables.projects)
+  if (holdBack) return fail(holdBack)
 
   migrateTables(tables, version as number)
   const file: ExportFile = {

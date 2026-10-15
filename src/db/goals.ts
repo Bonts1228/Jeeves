@@ -19,10 +19,26 @@ export async function saveGoal(goal: Goal, db: BriefDB = defaultDb) {
   })
 }
 
+// A wait on a project with nothing open is already over, so it isn't kept.
 export async function saveProject(project: Project, db: BriefDB = defaultDb) {
   await db.transaction('rw', [db.goals, db.projects, db.tasks], async () => {
-    await db.projects.put(project)
+    const clean: Project = { ...project }
+    if (clean.startsAfterProjectId && !(await hasOpen(db, clean.startsAfterProjectId))) delete clean.startsAfterProjectId
+    await db.projects.put(clean)
     await renumber(db, { projectId: project.id })
+  })
+}
+
+const hasOpen = async (db: BriefDB, projectId: ID) =>
+  (await db.tasks.where('projectId').equals(projectId).filter(isOpen).count()) > 0
+
+// Once every step of a project is done or deleted, the projects waiting on it start: their
+// startsAfterProjectId clears. Undo done doesn't bring the wait back. Call inside a transaction on
+// tasks and projects wherever a project's last open step can go (done, delete, moved out).
+export async function releaseWaiting(db: BriefDB, projectId: ID | undefined) {
+  if (!projectId || (await hasOpen(db, projectId))) return
+  await db.projects.where('startsAfterProjectId').equals(projectId).modify((p) => {
+    delete p.startsAfterProjectId
   })
 }
 
@@ -30,6 +46,7 @@ export interface Affected {
   open: number // backlog or scheduled: kept as loose tasks or deleted, as chosen
   done: number // always kept as history, unlinked
   projects: number // goal only: projects that feed it, which stay but stop feeding it
+  waiting: number // project only: projects waiting on it, which start now
 }
 
 const linkedTasks = async (db: BriefDB, field: 'goalId' | 'projectId', id: ID) =>
@@ -43,6 +60,7 @@ export async function affectedBy(kind: 'goal' | 'project', id: ID, db: BriefDB =
     open: tasks.filter(isOpen).length,
     done: tasks.filter((t) => t.status === 'done').length,
     projects: kind === 'goal' ? await db.projects.filter((p) => p.goalId === id).count() : 0,
+    waiting: kind === 'project' ? await db.projects.where('startsAfterProjectId').equals(id).count() : 0,
   }
 }
 
@@ -67,8 +85,13 @@ export async function deleteGoalOrProject(
       for (const p of await db.projects.filter((p) => p.goalId === id).toArray())
         await db.projects.update(p.id, { goalId: undefined })
       await db.goals.delete(id)
+      // Deleted open tasks may have been a project's last open steps
+      for (const projectId of new Set(tasks.map((t) => t.projectId))) await releaseWaiting(db, projectId)
     } else {
       await db.projects.delete(id)
+      await db.projects.where('startsAfterProjectId').equals(id).modify((p) => {
+        delete p.startsAfterProjectId
+      })
       // A kept task that also has a goal joins that goal's list
       for (const goalId of goalIds) await renumber(db, { goalId })
     }

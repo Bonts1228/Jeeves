@@ -133,8 +133,8 @@ describe('deleting a goal or project', () => {
   })
 
   it('counts what is affected', async () => {
-    expect(await affectedBy('project', 'p', db)).toEqual({ open: 2, done: 1, projects: 0 })
-    expect(await affectedBy('goal', 'job', db)).toEqual({ open: 2, done: 0, projects: 1 })
+    expect(await affectedBy('project', 'p', db)).toEqual({ open: 2, done: 1, projects: 0, waiting: 0 })
+    expect(await affectedBy('goal', 'job', db)).toEqual({ open: 2, done: 0, projects: 1, waiting: 0 })
   })
 
   it("'keep' leaves open tasks as loose Backlog tasks", async () => {

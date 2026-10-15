@@ -71,6 +71,31 @@ describe('export / import', () => {
     expect(lifting.title).toBe('Olympic lifting: C&J 120kg, snatch 100kg')
   })
 
+  it('project hold-back round-trips', async () => {
+    await lived()
+    await db.projects.add({ id: 'p3', title: 'Portfolio', areaId: 'area-focus', notBefore: '2026-11-02', startsAfterProjectId: 'proj-job-setup' })
+    const before = await snapshot()
+    const parsed = parseImport(JSON.stringify(await exportData(db, now)))
+    if (!parsed.ok) throw new Error(parsed.reason)
+    await seed(db, now)
+    await importData(parsed.file, db)
+    expect(await snapshot()).toStrictEqual(before)
+    expect(await db.projects.get('p3')).toMatchObject({ notBefore: '2026-11-02', startsAfterProjectId: 'proj-job-setup' })
+  })
+
+  it('a v3 file imports unchanged', async () => {
+    await lived()
+    const before = await snapshot()
+    const v3 = await exportData(db, now)
+    v3.schemaVersion = 3
+    const parsed = parseImport(JSON.stringify(v3))
+    if (!parsed.ok) throw new Error(parsed.reason)
+    expect(parsed.summary.fromVersion).toBe(3)
+    await seed(db, now)
+    await importData(parsed.file, db)
+    expect(await snapshot()).toStrictEqual(before)
+  })
+
   describe('a bad file changes nothing and says why', () => {
     let good: ExportFile
     let before: Awaited<ReturnType<typeof snapshot>>
@@ -94,6 +119,36 @@ describe('export / import', () => {
       ['bad status', () => variant((f) => (f.tables.tasks[0].status = 'later')), /^Task 1 \(“.+”\) has a missing or invalid status\.$/],
       ['duplicate ids', () => variant((f) => f.tables.goals.push(f.tables.goals[0])), 'Two goal rows share the id goal-jeeves.'],
       ['bad settings', () => variant((f) => delete f.settings.capacity[3]), 'Settings are missing or incomplete.'],
+      ['bad notBefore', () => variant((f) => (f.tables.projects[1].notBefore = '2 Nov')), 'Project “Job search setup” has an invalid notBefore.'],
+      [
+        'waits on a missing project',
+        () => variant((f) => (f.tables.projects[1].startsAfterProjectId = 'gone')),
+        "Project “Job search setup” waits on a project that isn't in the file.",
+      ],
+      [
+        'waits on itself',
+        () => variant((f) => (f.tables.projects[1].startsAfterProjectId = 'proj-job-setup')),
+        'Project “Job search setup” waits on itself.',
+      ],
+      [
+        'two projects wait on each other',
+        () =>
+          variant((f) => {
+            f.tables.projects[0].startsAfterProjectId = 'proj-job-setup'
+            f.tables.projects[1].startsAfterProjectId = 'proj-housekeeping'
+          }),
+        'Projects wait on each other in a loop: “Housekeeping” → “Job search setup” → “Housekeeping”.',
+      ],
+      [
+        'a longer loop',
+        () =>
+          variant((f) => {
+            f.tables.projects.push({ id: 'p3', title: 'Portfolio', areaId: 'area-focus', startsAfterProjectId: 'proj-housekeeping' })
+            f.tables.projects[0].startsAfterProjectId = 'proj-job-setup'
+            f.tables.projects[1].startsAfterProjectId = 'p3'
+          }),
+        'Projects wait on each other in a loop: “Housekeeping” → “Job search setup” → “Portfolio” → “Housekeeping”.',
+      ],
     ])('%s', async (_, make, reason) => {
       const parsed = parseImport(make())
       expect(parsed.ok).toBe(false)
