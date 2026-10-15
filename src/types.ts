@@ -45,7 +45,7 @@ export interface Goal {
   target?: number
   period?: 'week' | 'month'
   deadline?: ISODate
-  recurringBlockId?: ID // recurring goals run as a count OR a reserved block
+  servedByBlocks?: boolean // recurring only: every block in areaId counts as one; else a count of ticked tasks
   detailFields?: string[] // e.g. ['role', 'company']
 }
 
@@ -53,7 +53,13 @@ export interface Project {
   id: ID
   title: string
   areaId: ID
+  goalId?: ID // done steps log against this goal
+  manualOnly?: boolean // e.g. Housekeeping: never auto-placed unless due or overdue
 }
+
+export type Repeat =
+  | { kind: 'every'; days: number } // laundry: every 8 days from when last done
+  | { kind: 'weekly'; weekday: Weekday } // meal plan: every Sunday
 
 export type TaskStatus = 'backlog' | 'scheduled' | 'done' | 'deleted'
 
@@ -66,6 +72,8 @@ export interface Task {
   projectId?: ID
   order?: number // step position in a set path or project
   due?: ISODate
+  repeat?: Repeat // requires due; done creates the next occurrence
+  prevId?: ID // the occurrence this one follows; at most one task per prevId
   status: TaskStatus
   date?: ISODate // set when scheduled
   blockId?: ID
@@ -77,8 +85,9 @@ export interface Task {
 
 export interface LogEntry {
   id: ID
-  taskId: ID
   goalId?: ID
+  taskId?: ID // a ticked task, or
+  blockId?: ID // a ticked block of a servedByBlocks goal
   completedAt: string
   details?: Record<string, string>
 }

@@ -2,6 +2,7 @@
 // IDs are stable strings so re-running the seed always produces the same rows.
 // Created/due dates are relative to the day the seed runs; goal deadlines are fixed.
 
+import { isoDate } from '../lib/dates'
 import type { Area, BlockTemplate, Goal, Project, Settings, Task, Weekday } from '../types'
 
 export interface SeedData {
@@ -14,13 +15,6 @@ export interface SeedData {
 }
 
 const AREA = { focus: 'area-focus', social: 'area-social', gym: 'area-gym' }
-
-function isoDate(d: Date): string {
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${y}-${m}-${day}`
-}
 
 export function buildSeed(today = new Date()): SeedData {
   const dayOffset = (n: number) => {
@@ -88,8 +82,7 @@ export function buildSeed(today = new Date()): SeedData {
       detailFields: ['role', 'company'],
     },
     {
-      // Runs as the reserved Gym blocks (5 a week), not as tasks. recurringBlockId holds a
-      // single ID, so it can't point at all five templates yet; the Gym area marks them.
+      // Runs as the Gym blocks (5 a week), not as tasks: each ticked Gym block counts once.
       id: 'goal-lifting',
       title: 'Olympic lifting: C&J 120kg, snatch 100kg',
       type: 'recurring',
@@ -97,11 +90,15 @@ export function buildSeed(today = new Date()): SeedData {
       target: 5,
       period: 'week',
       deadline: '2026-12-31',
+      servedByBlocks: true,
       detailFields: ['lift', 'weight'],
     },
   ]
 
-  const projects: Project[] = [{ id: 'proj-housekeeping', title: 'Housekeeping', areaId: AREA.focus }]
+  const projects: Project[] = [
+    { id: 'proj-housekeeping', title: 'Housekeeping', areaId: AREA.focus, manualOnly: true },
+    { id: 'proj-job-setup', title: 'Job search setup', areaId: AREA.focus, goalId: 'goal-job' },
+  ]
 
   // [title, estimate, area, extras]
   type Row = [string, number, string, Partial<Task>?]
@@ -127,9 +124,20 @@ export function buildSeed(today = new Date()): SeedData {
     ['Scope Trellis MVP', 120, AREA.focus, { goalId: 'goal-trellis', order: 1 }],
     // Open path: job applications
     ...Array.from({ length: 20 }, (_, i): Row => [`Application #${i + 1}`, 40, AREA.focus, { goalId: 'goal-job' }]),
-    // Project: Housekeeping
-    ['Do laundry', 45, AREA.focus, { projectId: 'proj-housekeeping' }],
-    ['Plan meals for the week', 30, AREA.focus, { projectId: 'proj-housekeeping', due: due(nextSunday) }],
+    // Project: Job search setup, ordered steps feeding Secure a job
+    ['Update CV', 120, AREA.focus, { projectId: 'proj-job-setup', order: 1 }],
+    ['Refresh LinkedIn', 60, AREA.focus, { projectId: 'proj-job-setup', order: 2 }],
+    ['Build target list of firms', 120, AREA.focus, { projectId: 'proj-job-setup', order: 3 }],
+    ['Set up application tracker', 30, AREA.focus, { projectId: 'proj-job-setup', order: 4 }],
+    ['Recruiter outreach – first 10', 60, AREA.focus, { projectId: 'proj-job-setup', order: 5 }],
+    // Project: Housekeeping (manual-only)
+    ['Do laundry', 45, AREA.focus, { projectId: 'proj-housekeeping', due: due(1), repeat: { kind: 'every', days: 8 } }],
+    [
+      'Plan meals for the week',
+      30,
+      AREA.focus,
+      { projectId: 'proj-housekeeping', due: due(nextSunday), repeat: { kind: 'weekly', weekday: 0 } },
+    ],
     ['Weekly food shop', 60, AREA.focus, { projectId: 'proj-housekeeping' }],
     ['Clean flat', 60, AREA.focus, { projectId: 'proj-housekeeping' }],
     ['Admin/post', 30, AREA.focus, { projectId: 'proj-housekeeping' }],

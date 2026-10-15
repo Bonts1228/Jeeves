@@ -65,11 +65,21 @@ interface Goal {
   target?: number;                          // e.g. 5
   period?: 'week' | 'month';
   deadline?: ISODate;
-  recurringBlockId?: ID;                    // recurring goals run as a count OR a reserved block
+  servedByBlocks?: boolean;                 // recurring only: true = every block in areaId counts
+                                            // as one occurrence (every Gym block serves lifting);
+                                            // false/absent = runs as a count of ticked tasks
   detailFields?: string[];                  // e.g. ['role', 'company']
 }
 
-interface Project { id: ID; title: string; areaId: ID; }
+interface Project {
+  id: ID; title: string; areaId: ID;
+  goalId?: ID;                              // done steps log against this goal
+  manualOnly?: boolean;                     // e.g. Housekeeping: see "Manual-only projects"
+}
+
+type Repeat =
+  | { kind: 'every'; days: number }         // laundry: every 8 days from when last done
+  | { kind: 'weekly'; weekday: 0|1|2|3|4|5|6 };  // meal plan: every Sunday
 
 type TaskStatus = 'backlog' | 'scheduled' | 'done' | 'deleted';
 interface Task {
@@ -77,6 +87,8 @@ interface Task {
   estimate: Minutes; areaId: ID;
   goalId?: ID; projectId?: ID; order?: number;  // step position in a set path or project
   due?: ISODate;
+  repeat?: Repeat;                          // requires due; see "Repeating tasks"
+  prevId?: ID;                              // the occurrence this one follows
   status: TaskStatus;
   date?: ISODate; blockId?: ID;             // set when scheduled
   reason?: string;                          // one-line reason shown in the brief
@@ -86,17 +98,24 @@ interface Task {
 }
 
 interface LogEntry {
-  id: ID; taskId: ID; goalId?: ID;
+  id: ID; goalId?: ID;
+  taskId?: ID;                              // a ticked task, or
+  blockId?: ID;                             // a ticked block of a servedByBlocks goal
   completedAt: string;
   details?: Record<string, string>;         // e.g. { role: 'Analyst', company: '…' }
 }
 
 interface InboxItem { id: ID; text: string; createdAt: string; }
+
+// meta: key-value facts about this device, never exported. 'lastExportAt' → ISO time.
 ```
 
 - **Overdue** = `status === 'scheduled' && date < today`.
 - **Progress** = log entries for a goal within its current period, compared with `target`.
+  A task's goal is `task.goalId`, else its project's `goalId`.
+- **One-off blocks** are Blocks with no `templateId`, created for a single date.
 - **No timer.** Ticking done is the only completion signal.
+- **Export / import:** one JSON file `{ app, schemaVersion, exportedAt, settings, tables }` of every data table (not `meta`). Import checks the whole file first (JSON, app, version not newer, required fields, duplicate ids), upgrades older versions with the same migrations as the database (`src/db/migrations.ts`), confirms, then replaces everything in one transaction. Bump `SCHEMA_VERSION` with every `db.version()`.
 
 ## Brief rules v0
 
@@ -104,19 +123,28 @@ interface InboxItem { id: ID; text: string; createdAt: string; }
 2. **Rank candidate tasks**, highest first:
    1. Overdue — reason "Overdue from Tue"
    2. Due by tomorrow — "Due Thu"
-   3. Recurring goals behind pace — "3 left this week"
-   4. Next step of each set path or project, by `order` — "CFA: next unit"
-   5. Everything else in the Backlog, oldest first — "Waiting since 2 Oct"
-3. **Fill blocks in time order.** A task goes in the first block of its area with room for its whole estimate. Never split tasks.
+   3. Recurring count goals behind pace — "3 left this week" (`servedByBlocks` goals are served by their blocks, not tasks)
+   4. Next step of each set path or project, by `order` — "CFA: next unit" (skip manual-only projects)
+   5. Everything else in the Backlog, oldest first — "Waiting since 2 Oct" (skip manual-only project tasks and repeating tasks)
+3. **Fill blocks in time order.** A task goes in the first block of its area with room for its whole estimate. A manual-only project task goes in the first non-protected block of any area with room. Never split tasks.
 4. **Stop at capacity:** the lower of the day's capacity setting and total block time.
 5. **Save each placement** as `status: 'scheduled'` with `date`, `blockId`, `reason`.
 
 Other rules:
 
+- **Repeating tasks:** ticking done creates the next occurrence: a copy with a new id, `status: 'backlog'`, `rollovers: 0`, and `due` set to completion date + N days (`every`), or the given weekday strictly after the later of completion date and old due date (`weekly`, so finishing Sat for a Sun task goes to the following Sun). Only done creates the next one. Delete ends the series, and Back to Backlog keeps the same occurrence. A task has at most one next occurrence (`prevId`), so ticking twice or tick → undo → tick never duplicates. **Undo done** reopens the task (`scheduled` if it has a date, else `backlog`), removes its latest LogEntry, and removes the next occurrence if it is still open (a done or deleted one stays). Repeating tasks enter the brief only through rules 2.1/2.2. Reason shows the cadence: "Due Sun · weekly".
+- **Manual-only projects (Housekeeping):** life admin not tied to a goal. Their tasks are never auto-placed unless overdue or due by tomorrow. You add them yourself, at Brief review ("+ Add from Backlog") or on capture ("Schedule" chip: today/tomorrow + block). The picker lists every non-protected block that day with room for the whole estimate, any area, plus **New block** (start/end → one-off Block in the task's area, not protected). Reason: "Added by you". Manual adds may exceed capacity. Brief review then shows "n min over" and does not block.
+- **Step order:** a set-path goal's tasks and a non-manual project's tasks are ordered: every non-deleted step, done ones included, has `order` 1..n with no gaps or duplicates. New or moved-in steps go last; delete closes the gap; a done step keeps its place; a repeating step's next occurrence goes last. Reorder with ↑/↓ (swaps with the nearest open step). Other tasks have no `order`. Changing a goal's type or a project's manual-only flag renumbers: becoming ordered numbers steps oldest first, becoming unordered clears `order`.
+- **Deleting a goal or project** confirms first with counts: open tasks are kept as loose Backlog tasks or deleted, as chosen; done tasks stay as history, unlinked; projects feeding a deleted goal stay, unlinked. Log entries are never touched (nor by target/period edits: progress recomputes).
+- **Block goals:** each block in a `servedByBlocks` goal's area gets a Done tick (detail form first if the goal has `detailFields`). It writes a LogEntry with `blockId` and `goalId`.
 - **Unfinished at block end:** prompt per task with three buttons — **Next block** (same area), **Pick a block**, **Back to Backlog**. Each increments `rollovers`. Still unscheduled at end of day → Overdue.
 - **Overdue:** visible on Home; prompt to reschedule or delete.
 - **Urgent capture:** a task due today re-runs step 3 for today's remaining blocks. Displaced tasks go back to the Backlog; show a banner with the reason and an Undo.
 - **Progress:** ticking a task writes a LogEntry. If its goal has `detailFields`, show a small skippable form first.
+
+## PWA updates
+
+A new deploy reaches the phone without reinstalling. `vite-plugin-pwa` with `registerType: 'prompt'` (`autoUpdate` reloads mid-use), driven by `src/lib/pwa-update.ts`. The app checks for a new service worker on launch and whenever it returns to the foreground (`visibilitychange`). A new version installs in the background and is applied (reload) only when the app comes to the foreground, never while it is in use. Vercel serves everything except hashed `/assets/` (incl. `sw.js`, `index.html`, the manifest) with `Cache-Control: no-cache`.
 
 ## Screens
 
@@ -130,7 +158,7 @@ Bottom bar on main screens: **Plan** · **+ (quick capture)** · **Backlog**.
 | Brief review | Tomorrow's tasks grouped by block, reason under each, remove (×), "+ Add from Backlog", Confirm brief |
 | Backlog | Inbox count, Goals with progress numbers, Projects with "n of m steps" |
 | Capture | Bottom sheet: text input, chips for estimate / area / goal / due, To Inbox or Add to Backlog |
-| Settings | Brief time, capacity per weekday, areas, block templates |
+| Settings | Brief time, capacity per weekday, areas, block templates, backup (export / import, last export date) |
 
 Mockups: "Product Mural" design canvas (Phone · Home, Focus block, Unfinished prompt, Brief review, Backlog, Capture).
 
@@ -141,19 +169,33 @@ Work one milestone at a time. Each must be usable on the phone before moving on.
 | Milestone | Builds | Done when |
 | --- | --- | --- |
 | M1 Shell | PWA scaffold, bottom bar, Dexie database, seed script, Settings (areas, block templates, capacity) | Installed on phone home screen; seed data visible |
-| M2 Backlog + capture | Capture sheet → Inbox; task create/edit; goals (3 types) and projects; Backlog screen | A week's real tasks entered in under 10 minutes |
-| M3 Brief | Brief rules v0; Brief review screen with remove and "+ Add from Backlog"; Confirm | Tomorrow's brief fills blocks sensibly, each item with a reason |
-| M4 Day + focus block | Home with Up next; Focus block view; Done writes a LogEntry | A full day can be run from the phone |
+| M2 Backlog + capture | PWA auto-update; Capture sheet → Inbox; task create/edit incl. repeat rule (next occurrence on done, unit-tested); goals (3 types; recurring as count or area blocks) and projects (optional goal link, manual-only flag); Housekeeping scheduling from capture into a block with room or a new one-off block; Backlog screen; data export / import | A week's real tasks entered in under 10 minutes; a redeploy shows on the phone on next launch without reinstalling |
+| M3 Brief | Brief rules v0 incl. manual-only and repeating rules; Brief review screen with remove and "+ Add from Backlog" (any-area block picker + New block for manual-only tasks); Confirm | Tomorrow's brief fills blocks sensibly, each item with a reason |
+| M4 Day + focus block | Home with Up next; Focus block view; Done writes a LogEntry and creates the next occurrence of repeating tasks; Done tick on goal blocks | A full day can be run from the phone |
 | M5 Unfinished + overdue | Block-end prompt; end-of-day overdue; reschedule/delete prompts | Nothing silently disappears |
 | M6 Progress + re-plan | Goal counters on Backlog; detail fields on tick; urgent-capture re-plan with Undo | Backlog shows goals as numbers that move |
 
 ## Seed data
 
-Seed with the owner's real week (provided at the start of M1): real blocks per weekday plus at least one protected block; one goal of each type (set path, open path, recurring with detail fields); one project with 4–6 steps; 20–30 real tasks with estimates, a few with due dates. Keep the seed script re-runnable.
+Seed with the owner's real week (provided at the start of M1): real blocks per weekday plus at least one protected block; one goal of each type (set path, open path, recurring with detail fields, served by its area's blocks); one project with 4–6 steps linked to a goal; Housekeeping as a manual-only project; 20–30 real tasks with estimates, a few with due dates, and repeating tasks (laundry every 8 days, meal plan every Sunday). Keep the seed script re-runnable.
 
 ## Self-test
 
 Run it daily after M4. Each evening, one line: did the brief fit the day, and what changed? Success test: **trusting Today enough to stop checking the Backlog.**
+
+## Parked ideas
+
+Not approved for building. Recorded so they aren't lost.
+
+**v2 (assistant)**
+- AI-suggested tasks that the user ticks to keep or deletes.
+- Prospecting outreach with message templates.
+- Claude connection.
+
+**Candidates, not yet approved**
+- Project end date.
+- Project start conditions: "starts after project X" or "not before <date>". Held-back projects show last in the Backlog under "Later".
+- Follow-up nudges: ticking an outreach task creates a follow-up due in N days, cancelled if the outreach is marked replied.
 
 ## Out of scope — do not build
 

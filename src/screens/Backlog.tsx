@@ -1,8 +1,15 @@
 import { useLiveQuery } from 'dexie-react-hooks'
-import type { ReactNode } from 'react'
+import { type ReactNode, useState } from 'react'
+import { Link } from 'react-router-dom'
+import { GoalSheet } from '../components/GoalSheet'
+import { ProjectSheet } from '../components/ProjectSheet'
+import { TaskSheet } from '../components/TaskSheet'
+import { secondaryBtn } from '../components/ui'
 import { db } from '../db/db'
-import { formatDuration } from '../lib/time'
-import type { GoalType } from '../types'
+import { isoDate } from '../lib/dates'
+import { goalNumber, nextStep, projectNumber } from '../lib/progress'
+import { taskFacts } from '../lib/task-fields'
+import type { Goal, GoalType, Task } from '../types'
 
 const GOAL_TYPE: Record<GoalType, string> = {
   set_path: 'Set path',
@@ -10,49 +17,84 @@ const GOAL_TYPE: Record<GoalType, string> = {
   recurring: 'Recurring',
 }
 
-// M1: read-only view of what's in the database. Editing comes in M2.
+// Inbox count, goals and projects as numbers, then loose tasks. Goals and projects open their own
+// screens; loose tasks open for editing here.
 export function Backlog() {
+  const [editing, setEditing] = useState<string | null>(null)
+  const [creating, setCreating] = useState<'goal' | 'project' | null>(null)
+  const [now] = useState(() => new Date())
   const inboxCount = useLiveQuery(() => db.inbox.count())
+  const areas = useLiveQuery(() => db.areas.toArray())
   const goals = useLiveQuery(() => db.goals.toArray())
   const projects = useLiveQuery(() => db.projects.toArray())
   const tasks = useLiveQuery(() => db.tasks.where('status').anyOf('backlog', 'scheduled', 'done').toArray())
+  const logs = useLiveQuery(() => db.logEntries.toArray())
 
-  if (inboxCount === undefined || !goals || !projects || !tasks) return null
+  if (inboxCount === undefined || !areas || !goals || !projects || !tasks || !logs) return null
 
-  const open = tasks.filter((t) => t.status !== 'done')
-  const loose = open.filter((t) => !t.goalId && !t.projectId)
+  const today = isoDate(now)
+  const isOpen = (t: Task) => t.status !== 'done'
+  const loose = tasks.filter((t) => isOpen(t) && !t.goalId && !t.projectId)
+  const areaName = (id: string) => areas.find((a) => a.id === id)?.name ?? 'area'
+
+  const goalSub = (g: Goal) => {
+    const own = tasks.filter((t) => t.goalId === g.id && !t.projectId)
+    const detail =
+      g.type === 'set_path'
+        ? nextStep(own) && `Next: ${nextStep(own)!.title}`
+        : g.servedByBlocks
+          ? `Every ${areaName(g.areaId)} block`
+          : `${own.filter(isOpen).length} open`
+    return [GOAL_TYPE[g.type], detail].filter(Boolean).join(' · ')
+  }
 
   return (
     <div className="space-y-6">
-      <div className="flex min-h-14 items-center justify-between rounded-xl bg-white px-4">
+      <Link to="/inbox" className="flex min-h-14 items-center justify-between rounded-xl bg-white px-4 active:bg-stone-50">
         <span className="font-medium">Inbox</span>
         <span className="tabular-nums text-stone-500">{inboxCount}</span>
-      </div>
+      </Link>
 
       <Group title="Goals">
         {goals.map((g) => (
-          <Row
-            key={g.id}
-            title={g.title}
-            sub={GOAL_TYPE[g.type] + (g.target ? ` · ${g.target} per ${g.period}` : '')}
-            value={`${open.filter((t) => t.goalId === g.id).length} tasks`}
-          />
+          <Row key={g.id} title={g.title} sub={goalSub(g)} value={goalNumber(g, tasks, logs, now)} to={`/goals/${g.id}`} />
         ))}
       </Group>
 
       <Group title="Projects">
         {projects.map((p) => {
-          const steps = tasks.filter((t) => t.projectId === p.id)
-          const done = steps.filter((t) => t.status === 'done').length
-          return <Row key={p.id} title={p.title} value={`${done} of ${steps.length} steps`} />
+          const next = nextStep(tasks.filter((t) => t.projectId === p.id))
+          return (
+            <Row
+              key={p.id}
+              title={p.title}
+              sub={p.manualOnly ? 'Only when you add it' : next && `Next: ${next.title}`}
+              value={projectNumber(p, tasks)}
+              to={`/projects/${p.id}`}
+            />
+          )
         })}
       </Group>
 
-      <Group title={`Tasks · ${loose.length}`}>
-        {loose.map((t) => (
-          <Row key={t.id} title={t.title} sub={t.due ? `Due ${t.due}` : undefined} value={formatDuration(t.estimate)} />
-        ))}
-      </Group>
+      <div className="flex gap-2">
+        <button type="button" className={`${secondaryBtn} flex-1`} onClick={() => setCreating('goal')}>
+          + Goal
+        </button>
+        <button type="button" className={`${secondaryBtn} flex-1`} onClick={() => setCreating('project')}>
+          + Project
+        </button>
+      </div>
+
+      {loose.length > 0 && (
+        <Group title={`Tasks · ${loose.length}`}>
+          {loose.map((t) => (
+            <Row key={t.id} title={t.title} sub={taskFacts(t, today)} onClick={() => setEditing(t.id)} />
+          ))}
+        </Group>
+      )}
+      {editing && <TaskSheet taskId={editing} onClose={() => setEditing(null)} />}
+      {creating === 'goal' && <GoalSheet onClose={() => setCreating(null)} />}
+      {creating === 'project' && <ProjectSheet onClose={() => setCreating(null)} />}
     </div>
   )
 }
@@ -66,14 +108,42 @@ function Group({ title, children }: { title: string; children: ReactNode }) {
   )
 }
 
-function Row({ title, sub, value }: { title: string; sub?: string; value: string }) {
-  return (
-    <li className="flex min-h-14 items-center gap-3 px-4 py-2">
-      <div className="flex-1">
+function Row({
+  title,
+  sub,
+  value,
+  onClick,
+  to,
+}: {
+  title: string
+  sub?: string
+  value?: string
+  onClick?: () => void
+  to?: string
+}) {
+  const content = (
+    <>
+      <div className="min-w-0 flex-1">
         <p className="font-medium">{title}</p>
-        {sub && <p className="text-sm text-stone-500">{sub}</p>}
+        {sub && <p className="truncate text-sm text-stone-500">{sub}</p>}
       </div>
-      <span className="shrink-0 tabular-nums text-sm text-stone-500">{value}</span>
+      {value && <span className="shrink-0 tabular-nums text-sm text-stone-500">{value}</span>}
+    </>
+  )
+  const cls = 'flex min-h-14 w-full items-center gap-3 px-4 py-2 text-left'
+  return (
+    <li>
+      {to ? (
+        <Link to={to} className={`${cls} active:bg-stone-50`}>
+          {content}
+        </Link>
+      ) : onClick ? (
+        <button type="button" className={`${cls} active:bg-stone-50`} onClick={onClick}>
+          {content}
+        </button>
+      ) : (
+        <div className={cls}>{content}</div>
+      )}
     </li>
   )
 }

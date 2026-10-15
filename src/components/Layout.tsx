@@ -2,7 +2,7 @@ import { Link, Outlet, useLocation } from 'react-router-dom'
 import { BottomBar } from './BottomBar'
 import { GearIcon } from './icons'
 
-const TITLES: Record<string, string> = { '/': 'Plan', '/backlog': 'Backlog' }
+const TITLES: Record<string, string> = { '/': 'Plan', '/backlog': 'Backlog', '/inbox': 'Inbox' }
 
 // Main screens: header with Settings link, content, bottom bar.
 export function Layout() {

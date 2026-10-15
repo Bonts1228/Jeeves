@@ -3,7 +3,19 @@ import { type ReactNode, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { BackIcon } from '../components/icons'
 import { Sheet } from '../components/Sheet'
+import { dangerBtn, input, primaryBtn, secondaryBtn } from '../components/ui'
 import { db, newId, SETTINGS_KEY } from '../db/db'
+import {
+  exportData,
+  exportFileName,
+  type ImportSummary,
+  importData,
+  lastExport,
+  markExported,
+  type ParsedImport,
+  parseImport,
+} from '../db/backup'
+import { SCHEMA_VERSION } from '../db/migrations'
 import { seed } from '../db/seed'
 import {
   blockMinutes,
@@ -16,10 +28,6 @@ import {
 } from '../lib/time'
 import type { Area, BlockTemplate, Settings as SettingsRow, Weekday } from '../types'
 
-const input = 'h-11 rounded-lg border border-stone-300 bg-white px-3 text-base'
-const primaryBtn = 'h-11 rounded-lg bg-stone-900 px-4 font-medium text-white disabled:opacity-40'
-const secondaryBtn = 'h-11 rounded-lg border border-stone-300 bg-white px-4 font-medium'
-const dangerBtn = 'h-11 rounded-lg px-4 font-medium text-red-700 active:bg-red-50'
 
 export function Settings() {
   const settings = useLiveQuery(() => db.settings.get(SETTINGS_KEY))
@@ -47,7 +55,11 @@ export function Settings() {
         )}
         {areas && <Areas areas={areas} />}
         {areas && templates && <Templates areas={areas} templates={templates} />}
+        <Backup />
         <ResetSeed />
+        <p className="text-center text-xs text-stone-400">
+          Build {new Date(__BUILD_TIME__).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+        </p>
       </main>
     </div>
   )
@@ -380,6 +392,143 @@ function TemplateSheet({
         </div>
       </form>
     </Sheet>
+  )
+}
+
+const when = (iso: string) =>
+  new Date(iso).toLocaleString(undefined, { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
+
+interface Prepared {
+  file: File
+  exportedAt: string
+}
+
+// Export to one JSON file (share sheet on iPhone: Save to Files), import one back.
+function Backup() {
+  const last = useLiveQuery(async () => (await lastExport()) ?? null)
+  const [prepared, setPrepared] = useState<Prepared | null>(null)
+  const [toImport, setToImport] = useState<Extract<ParsedImport, { ok: true }> | null>(null)
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null)
+
+  // Share sheet where files can be shared (iPhone), else a download. Only a completed share counts.
+  const deliver = async ({ file, exportedAt }: Prepared) => {
+    if (navigator.canShare?.({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file] })
+      } catch (e) {
+        const name = (e as Error).name
+        if (name === 'NotAllowedError') setPrepared({ file, exportedAt }) // the tap expired while preparing: one more tap
+        else if (name !== 'AbortError') setMessage({ ok: false, text: `Export failed: ${(e as Error).message}` })
+        return
+      }
+    } else {
+      const url = URL.createObjectURL(file)
+      const a = Object.assign(document.createElement('a'), { href: url, download: file.name })
+      a.click()
+      setTimeout(() => URL.revokeObjectURL(url), 10_000)
+    }
+    setPrepared(null)
+    await markExported(exportedAt)
+    setMessage({ ok: true, text: `Exported ${file.name}.` })
+  }
+
+  const exportNow = async () => {
+    setMessage(null)
+    const data = await exportData()
+    const file = new File([JSON.stringify(data, null, 2)], exportFileName(), { type: 'application/json' })
+    await deliver({ file, exportedAt: data.exportedAt })
+  }
+
+  const pick = async (file: File | undefined) => {
+    setMessage(null)
+    setToImport(null)
+    if (!file) return
+    const parsed = parseImport(await file.text())
+    if (parsed.ok) setToImport(parsed)
+    else setMessage({ ok: false, text: `Can't import ${file.name}: ${parsed.reason} Nothing was changed.` })
+  }
+
+  const replace = async () => {
+    if (!toImport) return
+    try {
+      await importData(toImport.file)
+      setMessage({ ok: true, text: `Imported data from ${when(toImport.summary.exportedAt)}.` })
+    } catch (e) {
+      setMessage({ ok: false, text: `Import failed, nothing was changed: ${(e as Error).message}` })
+    }
+    setToImport(null)
+  }
+
+  return (
+    <Section title="Backup" hint="Data lives only on this device. Export a copy now and then.">
+      <p className="mb-3 text-sm">
+        Last export: <span className="font-medium">{last === undefined ? '…' : last ? when(last) : 'Never'}</span>
+      </p>
+      {toImport ? (
+        <ImportConfirm summary={toImport.summary} onCancel={() => setToImport(null)} onReplace={replace} />
+      ) : (
+        <div className="flex gap-2">
+          {prepared ? (
+            <button type="button" className={`${primaryBtn} flex-1`} onClick={() => deliver(prepared)}>
+              Save export file
+            </button>
+          ) : (
+            <button type="button" className={`${secondaryBtn} flex-1`} onClick={exportNow}>
+              Export data
+            </button>
+          )}
+          <label className={`${secondaryBtn} flex flex-1 cursor-pointer items-center justify-center focus-within:ring-2 focus-within:ring-stone-400`}>
+            Import data
+            <input
+              type="file"
+              accept=".json,application/json"
+              className="sr-only"
+              onChange={(e) => {
+                pick(e.target.files?.[0])
+                e.target.value = '' // the same file can be picked again
+              }}
+            />
+          </label>
+        </div>
+      )}
+      {message && (
+        <p role={message.ok ? 'status' : 'alert'} className={`mt-2 text-sm ${message.ok ? 'text-stone-500' : 'text-red-700'}`}>
+          {message.text}
+        </p>
+      )}
+    </Section>
+  )
+}
+
+function ImportConfirm({
+  summary,
+  onCancel,
+  onReplace,
+}: {
+  summary: ImportSummary
+  onCancel: () => void
+  onReplace: () => void
+}) {
+  const { exportedAt, tasks, goals, projects, inbox, fromVersion } = summary
+  return (
+    <div className="space-y-3 rounded-xl bg-red-50 p-3 text-red-900">
+      <p className="text-sm">
+        File from <span className="font-medium">{when(exportedAt)}</span>: {plural(tasks, 'task')}, {plural(goals, 'goal')},{' '}
+        {plural(projects, 'project')}, {plural(inbox, 'inbox item')}.
+        {fromVersion < SCHEMA_VERSION && ' Made by an older version; it will be upgraded.'}
+      </p>
+      <p className="font-medium">This replaces everything on this device.</p>
+      <div className="flex gap-2">
+        <button type="button" className={`${secondaryBtn} flex-1`} onClick={onCancel}>
+          Cancel
+        </button>
+        <button type="button" className="h-11 flex-1 rounded-lg bg-red-700 px-4 font-medium text-white" onClick={onReplace}>
+          Replace
+        </button>
+      </div>
+    </div>
   )
 }
 

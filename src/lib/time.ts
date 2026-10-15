@@ -35,3 +35,11 @@ export function formatDuration(mins: Minutes): string {
 export function overlaps(a: { start: string; end: string }, b: { start: string; end: string }) {
   return toMinutes(a.start) < toMinutes(b.end) && toMinutes(b.start) < toMinutes(a.end)
 }
+
+export function fromMinutes(mins: Minutes): string {
+  return `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`
+}
+
+export function minutesOfDay(d: Date): Minutes {
+  return d.getHours() * 60 + d.getMinutes()
+}
