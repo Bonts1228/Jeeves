@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Block, Goal, LogEntry, Project, Settings, Task } from '../types'
 import { buildBrief } from './brief'
-import { blockGoal, blockTasks, type DayInput, timeLeft, upNext, whenLabel } from './day'
+import { blockGoal, blockTasks, canQuickAdd, type DayInput, timeLeft, upNext, whenLabel } from './day'
 
 // Thu 15 Oct 2026. The brief was built on Wed 14 Oct at 21:00.
 const THU = '2026-10-15'
@@ -160,16 +160,26 @@ describe('upNext', () => {
     expect(upNext(day(at(18), tasks()))).toMatchObject({ kind: 'block', block: gym, current: true, goal: lifting, ticked: false })
   })
 
-  it('after the last block: leftovers from blocks that ended, else done', () => {
-    const left = upNext(day(at(22, 30), tasks()))
-    expect(left.kind === 'leftovers' && ids(left.tasks)).toEqual(['a1', 'a2', 'e1'])
+  it('after the last block: everything the Unfinished sheet would ask, else done', () => {
+    // Open tasks in ended or deleted blocks, plus the Gym block that ended unticked
+    const left = upNext(day(at(22, 30), [...tasks(), task('lost', { blockId: 'deleted' })]))
+    expect(left).toEqual({ kind: 'unfinished', count: 5 })
     const all = tasks().map((t) => ({ ...t, status: 'done' as const }))
     expect(upNext(day(at(22, 30), all, [tickGym]))).toEqual({ kind: 'done' })
   })
 
-  it('nothing planned: empty, unless a block goal was ticked', () => {
-    expect(upNext(day(at(22, 30), []))).toEqual({ kind: 'empty' })
+  it("an unticked block goal alone is unfinished, not done, until it's ticked or skipped", () => {
+    const all = tasks().map((t) => ({ ...t, status: 'done' as const }))
+    expect(upNext(day(at(22, 30), all))).toEqual({ kind: 'unfinished', count: 1 })
+    // Later (closed on) still counts; Skipped doesn't
+    expect(upNext({ ...day(at(22, 30), all), dismissed: ['block:gym'] })).toEqual({ kind: 'unfinished', count: 1 })
+    expect(upNext({ ...day(at(22, 30), all), dismissed: ['skipped:gym'] })).toEqual({ kind: 'done' })
+  })
+
+  it('nothing planned: empty, unless a block goal was ticked (or is still to answer)', () => {
+    expect(upNext({ ...day(at(22, 30), []), dismissed: ['skipped:gym'] })).toEqual({ kind: 'empty' })
     expect(upNext(day(at(22, 30), [], [tickGym]))).toEqual({ kind: 'done' })
+    expect(upNext(day(at(22, 30), []))).toEqual({ kind: 'unfinished', count: 1 })
   })
 })
 
@@ -180,6 +190,18 @@ describe('blockGoal', () => {
     expect(blockGoal(am, task('x', { projectId: 'setup' }), refs)).toBe(job)
     expect(blockGoal(am, task('x', { projectId: 'house' }), refs)).toBeUndefined()
     expect(blockGoal(am, undefined, refs)).toBeUndefined()
+  })
+})
+
+describe('canQuickAdd', () => {
+  it("is any of today's non-protected blocks until it ends: running or still to come, template or one-off", () => {
+    const oneOff = block('one-off', '14:00', '14:30') // no templateId, as made in Edit blocks
+    expect(canQuickAdd(oneOff, at(13))).toBe(true) // not started yet
+    expect(canQuickAdd(oneOff, at(14, 10))).toBe(true) // running
+    expect(canQuickAdd(oneOff, at(14, 30))).toBe(false) // ended
+    expect(canQuickAdd({ ...am, templateId: 'tpl' }, at(9))).toBe(true)
+    expect(canQuickAdd(lunch, at(12, 30))).toBe(false) // protected
+    expect(canQuickAdd(eve, new Date(2026, 9, 14, 21))).toBe(false) // not today (tomorrow's block)
   })
 })
 

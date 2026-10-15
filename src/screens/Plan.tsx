@@ -1,19 +1,23 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
+import { Capture } from '../components/Capture'
+import { DayBlocksSheet } from '../components/DayBlocksSheet'
 import { useDone } from '../components/DoneBanner'
+import { OverdueCard } from '../components/OverdueCard'
 import { TaskSheet } from '../components/TaskSheet'
+import { useUnfinishedPrompt } from '../components/UnfinishedSheet'
 import { BlockGoalRow, TaskRow } from '../components/TaskRow'
 import { primaryBtn, secondaryBtn } from '../components/ui'
 import { briefState } from '../db/brief'
 import { db, SETTINGS_KEY } from '../db/db'
-import { blockTasks, blockTicked, servedGoal, upNext, whenLabel } from '../lib/day'
+import { blockTasks, blockTicked, canQuickAdd, servedGoal, upNext, whenLabel } from '../lib/day'
 import { addDays, isoDate } from '../lib/dates'
 import { goalNumber } from '../lib/progress'
 import { blockMinutes, formatDuration, minutesOfDay, toMinutes } from '../lib/time'
 import { useDay } from '../lib/use-day'
 import { useNow } from '../lib/use-now'
-import type { ID, Weekday } from '../types'
+import type { Block, ID, Weekday } from '../types'
 
 // Home / day view: Up next, then today's blocks with their tasks, and the way into tomorrow's brief.
 export function Plan() {
@@ -26,19 +30,24 @@ export function Plan() {
   const brief = useLiveQuery(() => briefState(tomorrow), [tomorrow])
   const todayBrief = useLiveQuery(async () => (await briefState(today)) ?? null, [today])
   const [editing, setEditing] = useState<ID | null>(null)
+  const [editingBlocks, setEditingBlocks] = useState(false)
+  const [addingTo, setAddingTo] = useState<Block | null>(null)
   const { banner, toggleTask, toggleBlock } = useDone({ aboveBar: true })
+  const unfinished = useUnfinishedPrompt(today, day, now, { auto: !!day })
+  const unfinishedCount = unfinished.count
 
   if (!day || !settings || todayBrief === undefined) return null
   const { areaName, goals, logs, tasks } = day
 
   const blocks = [...day.blocks].sort((a, b) => toMinutes(a.start) - toMinutes(b.start))
   const blockTime = blocks.filter((b) => !b.protected).reduce((sum, b) => sum + blockMinutes(b), 0)
-  const next = upNext({ ...day, date: today, now })
+  const next = upNext({ ...day, date: today, now, dismissed: unfinished.dismissed })
   const briefDue = minutesOfDay(now) >= toMinutes(settings.briefTime)
   const number = (goalId: ID) => goalNumber(goals.find((g) => g.id === goalId)!, day.pathTasks, logs, now)
 
   return (
     <div className="space-y-4">
+      <OverdueCard today={today} />
       <section aria-label="Up next" className="rounded-xl bg-white p-4">
         {next.kind === 'block' && (
           <>
@@ -76,16 +85,14 @@ export function Plan() {
             </div>
           </>
         )}
-        {next.kind === 'leftovers' && (
+        {next.kind === 'unfinished' && (
           <>
-            <p className="font-semibold">
-              {next.tasks.length} task{next.tasks.length === 1 ? '' : 's'} left from earlier blocks
+            <p className="text-xl font-semibold">
+              {next.count} unfinished from earlier blocks
             </p>
-            <ul className="divide-y divide-stone-100">
-              {next.tasks.map((t) => (
-                <TaskRow key={t.id} task={t} onToggle={() => toggleTask(t)} onOpen={() => setEditing(t.id)} />
-              ))}
-            </ul>
+            <button type="button" className={`${primaryBtn} mt-3 w-full`} onClick={unfinished.open}>
+              Sort out
+            </button>
           </>
         )}
         {next.kind === 'done' && <p className="text-xl font-semibold">Today's done</p>}
@@ -101,6 +108,17 @@ export function Plan() {
         )}
       </section>
 
+      {next.kind !== 'unfinished' && unfinishedCount > 0 && (
+        <button
+          type="button"
+          onClick={unfinished.open}
+          className="flex min-h-14 w-full items-center justify-between rounded-xl bg-white px-4 active:bg-stone-50"
+        >
+          <span className="font-medium">{unfinishedCount} unfinished from earlier blocks</span>
+          <span className="text-sm text-stone-500">Sort out</span>
+        </button>
+      )}
+
       <Link
         to="/brief"
         className={`flex min-h-14 items-center justify-between rounded-xl px-4 ${
@@ -113,13 +131,18 @@ export function Plan() {
         </span>
       </Link>
 
-      <div>
-        <p className="font-medium">
-          {now.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'short' })}
-        </p>
-        <p className="text-sm text-stone-500">
-          {formatDuration(settings.capacity[weekday])} capacity · {formatDuration(blockTime)} in blocks
-        </p>
+      <div className="flex items-center gap-2">
+        <div className="flex-1">
+          <p className="font-medium">
+            {now.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'short' })}
+          </p>
+          <p className="text-sm text-stone-500">
+            {formatDuration(settings.capacity[weekday])} capacity · {formatDuration(blockTime)} in blocks
+          </p>
+        </div>
+        <button type="button" className={secondaryBtn} onClick={() => setEditingBlocks(true)}>
+          Edit blocks
+        </button>
       </div>
       <ul className="space-y-3">
         {blocks.length === 0 && <li className="text-stone-500">No blocks today.</li>}
@@ -158,6 +181,17 @@ export function Plan() {
                 {blockTasks(tasks, b, day).map((t) => (
                   <TaskRow key={t.id} task={t} onToggle={() => toggleTask(t)} onOpen={() => setEditing(t.id)} />
                 ))}
+                {canQuickAdd(b, now) && (
+                  <li>
+                    <button
+                      type="button"
+                      className="flex min-h-11 w-full items-center text-left text-sm font-medium text-stone-600"
+                      onClick={() => setAddingTo(b)}
+                    >
+                      + Add to this block
+                    </button>
+                  </li>
+                )}
               </ul>
             </li>
           )
@@ -165,6 +199,9 @@ export function Plan() {
       </ul>
       {banner}
       {editing && <TaskSheet taskId={editing} onClose={() => setEditing(null)} />}
+      {unfinished.sheet}
+      {addingTo && <Capture init={{ block: addingTo }} onClose={() => setAddingTo(null)} />}
+      {editingBlocks && <DayBlocksSheet date={today} onClose={() => setEditingBlocks(false)} />}
     </div>
   )
 }

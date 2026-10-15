@@ -1,6 +1,7 @@
 import 'fake-indexeddb/auto'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { addToBrief, briefState, confirmBrief, fillBrief, readBrief, removeFromBrief } from './brief'
+import { ensureBlocks } from './blocks'
 import { BriefDB } from './db'
 import { seed } from './seed'
 
@@ -33,6 +34,20 @@ describe('fillBrief', () => {
     ])
     expect([brief.used, brief.cap]).toEqual([505, 540])
     expect(await scheduled()).toHaveLength(5)
+  })
+
+  it("leaves today's tasks in a block still running alone, and carries ones from ended blocks", async () => {
+    const WED = '2026-10-14'
+    await ensureBlocks(WED, db)
+    const base = (await db.tasks.toArray()).find((t) => t.title === 'Update CV')!
+    const left = { ...base, title: 'Left', status: 'scheduled' as const, date: WED, order: undefined, projectId: undefined }
+    await db.tasks.bulkAdd([
+      { ...left, id: 'ended', blockId: `tpl-3-1@${WED}` },
+      { ...left, id: 'running', blockId: `tpl-3-4@${WED}` }, // 20:00–22:00, brief at 21:00
+    ])
+    await fillBrief(THU, { now: wed, db })
+    expect(await db.tasks.get('ended')).toMatchObject({ date: THU, reason: 'Carried from today', rollovers: 1 })
+    expect(await db.tasks.get('running')).toMatchObject({ date: WED, blockId: `tpl-3-4@${WED}` })
   })
 
   it('only adds on a second run', async () => {

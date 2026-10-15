@@ -1,6 +1,7 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { type ReactNode, useEffect, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { DayBlocksSheet } from '../components/DayBlocksSheet'
 import { BackIcon } from '../components/icons'
 import { Sheet } from '../components/Sheet'
 import { SchedulePicker } from '../components/TaskFields'
@@ -25,6 +26,7 @@ export function Brief() {
   const date = forToday ? today : addDays(today, 1)
   const [ready, setReady] = useState(false)
   const [adding, setAdding] = useState<Task | 'pick' | null>(null)
+  const [editingBlocks, setEditingBlocks] = useState(false)
 
   useEffect(() => {
     let live = true
@@ -58,11 +60,16 @@ export function Brief() {
 
   return (
     <Page title={title}>
-      <p className="text-sm text-stone-500">
-        {formatDuration(used)} of {formatDuration(brief.cap)}
-        {over > 0 && <span className="text-stone-900"> · {over} min over</span>}
-        {state?.confirmedAt && ' · Confirmed'}
-      </p>
+      <div className="flex items-center gap-2">
+        <p className="flex-1 text-sm text-stone-500">
+          {formatDuration(used)} of {formatDuration(brief.cap)}
+          {over > 0 && <span className="text-stone-900"> · {over} min over</span>}
+          {state?.confirmedAt && ' · Confirmed'}
+        </p>
+        <button type="button" className={secondaryBtn} onClick={() => setEditingBlocks(true)}>
+          Edit blocks
+        </button>
+      </div>
 
       <ul className="space-y-3">
         {sorted.length === 0 && <li className="text-stone-500">No blocks {forToday ? 'today' : 'tomorrow'}.</li>}
@@ -154,6 +161,7 @@ export function Brief() {
           onClose={() => setAdding(null)}
         />
       )}
+      {editingBlocks && <DayBlocksSheet date={date} onClose={() => setEditingBlocks(false)} />}
     </Page>
   )
 }

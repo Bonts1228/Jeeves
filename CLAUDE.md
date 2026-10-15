@@ -149,6 +149,19 @@ Clarified in M4 (`src/lib/day.ts`):
 - **Progress** counts entries in the whole current period (period start to the next period's start).
 - **Undo:** each tick shows an Undo banner for a few seconds; tapping a filled tick undoes it any time.
 
+Clarified in M5 (`src/lib/unfinished.ts`, `src/db/unfinished.ts`, `src/db/day-blocks.ts`):
+
+- **Unfinished** = scheduled today in a block that has ended or no longer exists. With no notifications, Home opens one **Unfinished sheet** for all of them (grouped by block) when the app is looked at: on open, on return to the foreground, every 30s, unless another sheet is showing. Focus shows "Block ended · n unfinished" with Sort out.
+- **Next block:** the first block of the task's area (any area for manual-only) with room for the whole estimate that hasn't ended, today first, then tomorrow; disabled with the reason if none. **Pick a block:** today or tomorrow, blocks with room or New block. **Back to Backlog** clears `date`, `blockId`, `reason`. All three add a rollover; the task keeps its reason when moved.
+- **Block goals at block end:** an ended block whose `servedByBlocks` goal is unticked joins the sheet ("Lifting · did you train?"): **Done** ticks it with `completedAt` = block end; **Skipped** writes nothing and stops asking for that block (`skipped:<blockId>` in the dismissed list); **Move session** offers the next same-area block today or tomorrow that hasn't ended or been ticked ("To Fri 17:30"), or **New block** (the block editor, area preset). Moving writes nothing and stops asking for the ended block (`moved:<blockId>`); the moved-to block asks in turn if it ends unticked. The goal counts only when a block is ticked. Later works as for tasks (`block:<blockId>`).
+- **Later** (or closing the sheet) changes nothing on the tasks; their ids go to `meta` `unfinished:<date>` so the sheet only reopens for new ones. They stay on Home ("n unfinished · Sort out"), then tomorrow's brief carries them or they become Overdue.
+- **Overdue card** on Home (scheduled before today): Reschedule (as Pick a block, plus Back to Backlog; a rollover) or Delete.
+- **Rule 2.1 tightened:** "Carried from today" only takes tasks whose block has ended (or is gone) when the brief is built; tasks in today's blocks still to come stay put.
+- **Per-day block editor** (Edit blocks on Home and Brief; today or tomorrow): edit times, delete, add an empty one-off block. No overlaps; today a block must end after now. Deleting today's block leaves its tasks pointing at it, so they're Unfinished; deleting a later day's block sends its tasks back to the Backlog with no rollover (they rank again in that day's brief, Not placed if they don't fit). Templates are never touched.
+- **Quick add:** "+ Add to this block" on Focus and Home's block cards, on any of today's non-protected blocks until it ends (running or still to come; `canQuickAdd`), opens Capture with that block fixed and its area preset (any area allowed). It's added even past the block's room, showing "n min over".
+- **Sheets** close by backdrop, Escape, Later/Close, or a swipe down on the handle/title (a quarter of the height or a fast flick), all the same way.
+- `ensureBlocks` marks a made day in `meta` `blocks:<date>` so a day edited down to no template blocks isn't remade; import clears these flags.
+
 Other rules:
 
 - **Repeating tasks:** ticking done creates the next occurrence: a copy with a new id, `status: 'backlog'`, `rollovers: 0`, and `due` set to completion date + N days (`every`), or the given weekday strictly after the later of completion date and old due date (`weekly`, so finishing Sat for a Sun task goes to the following Sun). Only done creates the next one. Delete ends the series, and Back to Backlog keeps the same occurrence. A task has at most one next occurrence (`prevId`), so ticking twice or tick → undo → tick never duplicates. **Undo done** reopens the task (`scheduled` if it has a date, else `backlog`), removes its latest LogEntry, and removes the next occurrence if it is still open (a done or deleted one stays). Repeating tasks enter the brief only through rules 2.1/2.2. Reason shows the cadence: "Due Sun · weekly".
@@ -217,6 +230,7 @@ Not approved for building. Recorded so they aren't lost.
 - Do now / reorder within a block: today a block's order is derived from the brief's tiers.
 - Several steps per path per day: a per-goal/project setting so a short next step can follow one already placed that day (today the brief adds one step per path per day).
 - Project end date.
+- Calendar-style block picker (a day timeline to tap a block or drag out a new one) for Unfinished, Pick a block and Schedule. For the design pass.
 - Follow-up nudges: ticking an outreach task creates a follow-up due in N days, cancelled if the outreach is marked replied.
 
 ## Out of scope — do not build

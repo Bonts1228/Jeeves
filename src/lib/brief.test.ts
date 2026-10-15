@@ -74,6 +74,22 @@ describe('rankCandidates', () => {
     ])
   })
 
+  it("carries today's tasks only once their block has ended or is gone; a block still to come keeps its tasks", () => {
+    const wedBlock = (id: string, start: string, end: string) => block(id, start, end, { date: WED })
+    const todayBlocks = [wedBlock('wed-pm', '14:00', '16:00'), wedBlock('wed-late', '21:30', '22:30')]
+    const tasks = [
+      task('ended', { status: 'scheduled', date: WED, blockId: 'wed-pm' }),
+      task('to come', { status: 'scheduled', date: WED, blockId: 'wed-late' }),
+      task('block deleted', { status: 'scheduled', date: WED, blockId: 'gone' }),
+    ]
+    expect(reasons(input({ tasks, todayBlocks }))).toEqual([
+      ['ended', 'Carried from today', 1],
+      ['block deleted', 'Carried from today', 1],
+    ])
+    // Once the late block has ended, a refill carries it too
+    expect(reasons(input({ tasks, todayBlocks, now: new Date(2026, 9, 14, 22, 30) })).map((r) => r[0])).toContain('to come')
+  })
+
   it('shows the cadence of a due repeating task, and leaves repeating and manual-only tasks out otherwise', () => {
     const tasks = [
       task('meal plan', { projectId: 'house', due: THU, repeat: { kind: 'weekly', weekday: 4 } }),

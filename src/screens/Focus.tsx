@@ -1,12 +1,15 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { type ReactNode, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import { Capture } from '../components/Capture'
 import { useDone } from '../components/DoneBanner'
 import { BackIcon } from '../components/icons'
 import { TaskSheet } from '../components/TaskSheet'
+import { useUnfinishedPrompt } from '../components/UnfinishedSheet'
 import { BlockGoalRow, TaskRow } from '../components/TaskRow'
+import { secondaryBtn } from '../components/ui'
 import { db } from '../db/db'
-import { blockGoal, blockTasks, blockTicked, servedGoal, upNext, whenLabel } from '../lib/day'
+import { blockGoal, blockTasks, blockTicked, canQuickAdd, servedGoal, upNext, whenLabel } from '../lib/day'
 import { isoDate } from '../lib/dates'
 import { goalNumber } from '../lib/progress'
 import { formatDuration } from '../lib/time'
@@ -22,7 +25,12 @@ export function Focus() {
   const block = useLiveQuery(async () => (await db.blocks.get(id)) ?? null, [id])
   const day = useDay(block?.date ?? isoDate(now))
   const [editing, setEditing] = useState<ID | null>(null)
+  const [adding, setAdding] = useState(false)
   const { banner, toggleTask, toggleBlock } = useDone()
+  // This block's unfinished tasks, once it has ended (today only: earlier days are Overdue on Home)
+  const today = isoDate(now)
+  const unfinished = useUnfinishedPrompt(today, block?.date === today ? day : undefined, now, { auto: false, blockId: id })
+  const groups = unfinished.groups
 
   if (block === null) return <Page title="Block not found" />
   if (!block || !day || day.blocks.every((b) => b.id !== block.id)) return <Page title="" />
@@ -50,6 +58,15 @@ export function Focus() {
           <span className="min-w-0 flex-1 truncate font-medium">{goal.title}</span>
           <span className="text-sm text-stone-500">{number(goal.id)}</span>
         </Link>
+      )}
+
+      {groups.length > 0 && (
+        <section className="flex items-center gap-3 rounded-xl bg-white p-4">
+          <p className="flex-1 font-medium">Block ended · {unfinished.count} unfinished</p>
+          <button type="button" className={secondaryBtn} onClick={unfinished.open}>
+            Sort out
+          </button>
+        </section>
       )}
 
       {current && (
@@ -99,8 +116,15 @@ export function Focus() {
             ))}
         </ul>
       )}
+      {canQuickAdd(block, now) && (
+        <button type="button" className={`${secondaryBtn} w-full`} onClick={() => setAdding(true)}>
+          + Add to this block
+        </button>
+      )}
       {banner}
       {editing && <TaskSheet taskId={editing} onClose={() => setEditing(null)} />}
+      {adding && <Capture init={{ block }} onClose={() => setAdding(false)} />}
+      {unfinished.sheet}
     </Page>
   )
 }

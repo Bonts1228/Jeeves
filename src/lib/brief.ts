@@ -3,6 +3,7 @@ import type { Area, Block, Goal, ID, ISODate, LogEntry, Minutes, Project, Repeat
 import { addDays, dayMonth, isoDate, parseISODate, weekdayOf } from './dates'
 import { isHeldBack } from './holdback'
 import { periodStart } from './progress'
+import { blockEnded } from './unfinished'
 import { blockMinutes, formatDuration, toMinutes, WEEKDAY_SHORT } from './time'
 
 // Brief rules v0 (CLAUDE.md), as a pure function: rank candidate tasks, then fill the date's blocks
@@ -18,6 +19,7 @@ export interface BriefInput {
   tasks: Task[] // open tasks (backlog and scheduled), any date
   logs: LogEntry[]
   blocks: Block[] // the date's blocks
+  todayBlocks?: Block[] // today's blocks, when planning a later day: which of today's tasks are left
   removed?: ID[] // taken out at review: never placed again for this date
 }
 
@@ -87,9 +89,15 @@ export function rankCandidates(input: BriefInput): Candidate[] {
     out.push({ task, reason, tier })
   }
 
-  // 1. Overdue: scheduled before the date. The brief runs the evening before, so today's leftovers count.
+  // 1. Overdue: scheduled before the date. The brief runs the evening before, so today's leftovers
+  // count: tasks whose block has ended or is gone. Tasks in today's blocks still to come stay put.
+  const todayBlocks = new Map((input.todayBlocks ?? []).map((b) => [b.id, b]))
+  const leftToday = (t: Task) => {
+    const block = todayBlocks.get(t.blockId!)
+    return !block || blockEnded(block, now)
+  }
   tasks
-    .filter((t) => t.status === 'scheduled' && t.date! < date)
+    .filter((t) => t.status === 'scheduled' && t.date! < date && (t.date !== today || leftToday(t)))
     .sort((a, b) => a.date!.localeCompare(b.date!) || oldestFirst(a, b))
     .forEach((t) => add(t, t.date === today ? CARRIED : `${OVERDUE}${shortDay(t.date!, today)}`, 1))
 

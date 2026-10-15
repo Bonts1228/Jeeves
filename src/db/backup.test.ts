@@ -59,6 +59,19 @@ describe('export / import', () => {
     expect(await lastExport(db)).toBe(now.toISOString())
   })
 
+  it("import clears the device's made-day flags, so imported days keep or remake their blocks", async () => {
+    await seed(db, now)
+    await ensureBlocks('2026-10-16', db)
+    const text = JSON.stringify(await exportData(db, now))
+    await db.blocks.clear() // the file has Fri's blocks; a fresh day (Sat) has none
+    await ensureBlocks('2026-10-17', db)
+    const parsed = parseImport(text)
+    if (!parsed.ok) throw new Error(parsed.reason)
+    await importData(parsed.file, db)
+    expect(await db.meta.get('blocks:2026-10-17')).toBeUndefined()
+    expect((await ensureBlocks('2026-10-17', db)).length).toBeGreaterThan(0)
+  })
+
   it('a v1 file imports and migrates', async () => {
     await seed(db, now)
     const v1 = (await exportData(db, now)) as ExportFile & { schemaVersion: number }

@@ -1,6 +1,7 @@
 import { findWaitLoop } from '../lib/holdback'
 import type { Settings } from '../types'
 import { type BriefDB, db as defaultDb, LAST_EXPORT_KEY, SETTINGS_KEY } from './db'
+import { BLOCKS_MADE_PREFIX } from './blocks'
 import { migrateTables, SCHEMA_VERSION } from './migrations'
 
 // Export / import of everything on the device as one JSON file. The meta table (device facts like
@@ -200,6 +201,8 @@ export async function importData(file: ExportFile, db: BriefDB = defaultDb) {
       await db.table(name).clear()
       await db.table(name).bulkAdd(file.tables[name])
     }
+    // The device's made-day flags describe the blocks just replaced
+    await db.meta.where(':id').startsWith(BLOCKS_MADE_PREFIX).delete()
     await markExported(file.exportedAt, db)
   })
 }

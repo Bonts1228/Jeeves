@@ -1,4 +1,5 @@
 import { type Brief, buildBrief } from '../lib/brief'
+import { isoDate } from '../lib/dates'
 import type { ID, ISODate } from '../types'
 import { ensureBlocks, type Placement } from './blocks'
 import { type BriefDB, db as defaultDb, SETTINGS_KEY } from './db'
@@ -25,7 +26,8 @@ const saveState = (db: BriefDB, date: ISODate, state: BriefState) => db.meta.put
 // What the rules would do now, without writing. Read-only, so it can run in a live query; the date's
 // blocks must already exist (ensureBlocks).
 export async function readBrief(date: ISODate, { now = new Date(), db = defaultDb }: { now?: Date; db?: BriefDB } = {}) {
-  const [settings, areas, goals, projects, tasks, logs, blocks, state] = await Promise.all([
+  const today = isoDate(now)
+  const [settings, areas, goals, projects, tasks, logs, blocks, todayBlocks, state] = await Promise.all([
     db.settings.get(SETTINGS_KEY),
     db.areas.toArray(),
     db.goals.toArray(),
@@ -33,10 +35,11 @@ export async function readBrief(date: ISODate, { now = new Date(), db = defaultD
     db.tasks.where('status').anyOf('backlog', 'scheduled').toArray(),
     db.logEntries.toArray(),
     db.blocks.where('date').equals(date).toArray(),
+    date > today ? db.blocks.where('date').equals(today).toArray() : [],
     briefState(date, db),
   ])
   if (!settings) throw new Error('No settings')
-  return buildBrief({ date, now, settings, areas, goals, projects, tasks, logs, blocks, removed: state?.removed })
+  return buildBrief({ date, now, settings, areas, goals, projects, tasks, logs, blocks, todayBlocks, removed: state?.removed })
 }
 
 // Fill the date's remaining room by the rules and save each placement (rule 5). Additive: what's

@@ -1,7 +1,9 @@
-import type { Block, Goal, ISODate, LogEntry, Minutes, Project, Task } from '../types'
+import type { Block, Goal, ID, ISODate, LogEntry, Minutes, Project, Task } from '../types'
+import { blockTicked, servedGoal } from './block-goal'
 import { isCarriedReason, isOverdueReason } from './brief'
 import { isoDate } from './dates'
 import { formatDuration, minutesOfDay, toMinutes } from './time'
+import { promptIds, unfinishedGroups } from './unfinished'
 
 // The day view (M4), as pure functions: the order of a block's tasks, what's up next, time left.
 // Nothing here is stored: order, "current task" and time left are all derived at render.
@@ -64,12 +66,7 @@ export function blockTasks(tasks: Task[], block: Block, { goals, projects }: Ref
   return [...mine.filter(isOpen).sort(compare), ...mine.filter((t) => t.status === 'done').sort(compare)]
 }
 
-// The recurring goal a block serves (every block in its area counts once), if any.
-export function servedGoal(block: Block, goals: Goal[]): Goal | undefined {
-  return goals.find((g) => g.type === 'recurring' && g.servedByBlocks && g.areaId === block.areaId)
-}
-
-export const blockTicked = (block: Block, logs: LogEntry[]) => logs.some((l) => l.blockId === block.id)
+export { blockTicked, servedGoal }
 
 // The goal shown in a block's header: the one the block serves, else the current task's goal.
 export function blockGoal(block: Block, task: Task | undefined, { goals, projects }: Refs): Goal | undefined {
@@ -91,6 +88,11 @@ export function timeLeft(block: Block, now: Date): TimeLeft {
   return { state: 'after' }
 }
 
+// "+ Add to this block": any of today's non-protected blocks that hasn't ended, running or still to come.
+export function canQuickAdd(block: Block, now: Date): boolean {
+  return !block.protected && block.date === isoDate(now) && timeLeft(block, now).state !== 'after'
+}
+
 // "1h 20m left", "in 40m", "Ended"
 export function whenLabel(block: Block, now: Date): string {
   const left = timeLeft(block, now)
@@ -105,14 +107,16 @@ export interface DayInput extends Refs {
   blocks: Block[] // the date's blocks
   tasks: Task[] // tasks dated today, any status
   logs: LogEntry[]
+  dismissed?: ID[] // the Unfinished prompt's dismissed list for the date: skipped block goals aren't asked
 }
 
 export type UpNext =
   // A block to work in now (current) or next. task: its first open task; none when only the
   // block's goal tick is left. goal/ticked: the goal the block serves and whether it's ticked.
   | { kind: 'block'; block: Block; current: boolean; task?: Task; goal?: Goal; ticked: boolean }
-  // No block left with work, but tasks still open in blocks that have ended (M5 adds the prompt)
-  | { kind: 'leftovers'; tasks: Task[] }
+  // No block left with work, but the Unfinished sheet has something to ask: open tasks in blocks
+  // that ended or were deleted, or ended block goals left unticked. count: how many questions.
+  | { kind: 'unfinished'; count: number }
   | { kind: 'done' } // everything today is ticked
   | { kind: 'empty' } // nothing planned today
 
@@ -137,8 +141,9 @@ export function upNext(input: DayInput): UpNext {
     if (w.has) return { kind: 'block', block: b, current: false, ...w }
   }
 
-  const left = open.flatMap((b) => blockTasks(tasks, b, input).filter(isOpen))
-  if (left.length) return { kind: 'leftovers', tasks: left }
+  const { goals, dismissed = [] } = input
+  const pending = promptIds(unfinishedGroups(date, tasks, blocks, now, { goals, logs, dismissed })).length
+  if (pending) return { kind: 'unfinished', count: pending }
   const planned = tasks.some((t) => t.date === date && (isOpen(t) || t.status === 'done'))
   const blockLogged = logs.some((l) => l.blockId && blocks.some((b) => b.id === l.blockId))
   return planned || blockLogged ? { kind: 'done' } : { kind: 'empty' }

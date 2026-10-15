@@ -43,6 +43,13 @@ describe('blocks', () => {
     expect(await db.blocks.count()).toBe(2)
   })
 
+  it("a day edited down to no template blocks isn't made again", async () => {
+    await ensureBlocks(FRI, db)
+    await db.blocks.where('date').equals(FRI).delete()
+    await db.blocks.add({ id: 'one-off', date: FRI, areaId: 'area-focus', start: '09:00', end: '10:00', protected: false })
+    expect((await ensureBlocks(FRI, db)).map((b) => b.id)).toEqual(['one-off'])
+  })
+
   it('lists non-protected blocks of any area with room, in time order', async () => {
     const list = await blocksWithRoom(FRI, 30, { now: thu, db })
     expect(list.map((b) => [b.block.areaId, b.room])).toEqual([
@@ -92,6 +99,18 @@ describe('blocks', () => {
     const block = await db.blocks.get(t!.blockId!)
     expect(block).toMatchObject({ date: FRI, start: '13:00', end: '13:30', areaId: 'area-focus', protected: false })
     expect(block?.templateId).toBeUndefined()
+  })
+
+  it('force adds into a block without room (going over), but never a protected or missing one', async () => {
+    await ensureBlocks(FRI, db)
+    await db.tasks.add(task({ id: 'big', estimate: 90, status: 'scheduled', date: FRI, blockId: 'fri-gym@2026-10-16' }))
+    const gym = { blockId: 'fri-gym@2026-10-16' }
+    expect(await scheduleNewTask(task({ id: 'a' }), FRI, gym, { now: thu, db })).toBe(false)
+    expect(await scheduleNewTask(task({ id: 'a' }), FRI, gym, { now: thu, db, force: true })).toBe(true)
+    expect(await db.tasks.get('a')).toMatchObject({ status: 'scheduled', blockId: 'fri-gym@2026-10-16', reason: 'Added by you' })
+    const social = { blockId: 'fri-social@2026-10-16' }
+    expect(await scheduleNewTask(task({ id: 'b' }), FRI, social, { now: thu, db, force: true })).toBe(false)
+    expect(await scheduleNewTask(task({ id: 'c' }), FRI, { blockId: 'nope' }, { now: thu, db, force: true })).toBe(false)
   })
 
   it('refuses one-off blocks that overlap, are too short, or start in the past', async () => {

@@ -22,26 +22,29 @@ import { input } from './ui'
 const ESTIMATES = [15, 30, 45, 60, 90, 120]
 type ChipName = 'estimate' | 'area' | 'link' | 'due' | 'repeat' | 'schedule'
 
-// Scheduling is offered for manual-only project tasks (any area) and already-scheduled tasks (own area).
+// Scheduling is offered for manual-only project tasks (any area) and already-scheduled tasks (own area),
+// unless noSchedule (the placement is already fixed, e.g. quick add into a block).
 export function TaskFields({
   fields,
   onChange,
   refs,
   today,
   task,
+  noSchedule = false,
 }: {
   fields: Fields
   onChange: (f: Fields) => void
   refs: Refs
   today: ISODate
   task?: Task
+  noSchedule?: boolean
 }) {
   const [open, setOpen] = useState<ChipName | null>(null)
   const { areas, goals, projects } = refs
   const { estimate, areaId, link, due, repeat, schedule } = fields
   const r = resolve(fields, refs)
   const anyArea = !!r.project?.manualOnly
-  const canSchedule = anyArea || task?.status === 'scheduled'
+  const canSchedule = !noSchedule && (anyArea || task?.status === 'scheduled')
   const scheduleIncomplete = !!schedule && !schedule.placement
 
   const set = (patch: Partial<Fields>) => onChange({ ...fields, ...patch })
