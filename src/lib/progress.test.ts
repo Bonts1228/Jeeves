@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { buildSeed } from '../db/seed-data'
 import type { LogEntry, Task } from '../types'
-import { goalNumber, nextStep, periodStart, projectNumber } from './progress'
+import { cleanDetails, detailsText, expectedBy, goalNumber, lastDetails, nextStep, paceLabel, periodLeft, periodStart, projectNumber } from './progress'
 
 const now = new Date(2026, 9, 15, 12) // Thu 15 Oct 2026
 const seed = buildSeed(now)
@@ -48,5 +48,47 @@ describe('Backlog numbers', () => {
     expect(projectNumber(project('proj-job-setup'), seed.tasks)).toBe('0 of 5 steps')
     expect(projectNumber(project('proj-housekeeping'), seed.tasks)).toBe('5 open')
     expect(goalNumber(goal('goal-trellis'), seed.tasks, [], now)).toBe('0 of 1 step')
+  })
+})
+
+describe('pace', () => {
+  it('expects an even share of the target by each day', () => {
+    expect(expectedBy(5, 'week', '2026-10-12')).toBe(1) // Mon, through the day: ceil(5/7)
+    expect(expectedBy(5, 'week', '2026-10-12', false)).toBe(0) // Mon morning: nothing yet
+    expect(expectedBy(5, 'week', '2026-10-15', false)).toBe(3) // Thu morning: 3 days done, ceil(15/7)
+    expect(expectedBy(5, 'week', '2026-10-18')).toBe(5) // Sunday night: all of it
+    expect(expectedBy(31, 'month', '2026-10-15', false)).toBe(14)
+  })
+
+  it('days left in the period include today', () => {
+    expect(periodLeft('week', now)).toBe('4 days left') // Thu: Thu–Sun
+    expect(periodLeft('week', new Date(2026, 9, 18, 21))).toBe('last day')
+    expect(periodLeft('month', now)).toBe('17 days left')
+  })
+
+  it('shows behind as a number, and nothing when on pace', () => {
+    const lifting = goal('goal-lifting')
+    expect(paceLabel(lifting, [log('goal-lifting', 13)], now)).toBe('2 behind · 4 days left')
+    const three = [12, 13, 14].map((d) => log('goal-lifting', d))
+    expect(paceLabel(lifting, three, now)).toBe('4 days left')
+    expect(paceLabel(goal('goal-jeeves'), [], now)).toBeNull() // set path: no target
+  })
+})
+
+describe('details', () => {
+  it('keeps only the fields filled in, and nothing if none were', () => {
+    expect(cleanDetails({ role: ' Analyst ', company: '' })).toEqual({ role: 'Analyst' })
+    expect(cleanDetails({ role: ' ', company: '' })).toBeUndefined()
+  })
+
+  it("shows details in the goal's field order, and the latest ones for the Backlog", () => {
+    expect(detailsText(goal('goal-job'), { company: 'Acme', role: 'Analyst' })).toBe('Analyst, Acme')
+    const logs = [
+      log('goal-job', 13, { details: { role: 'Analyst', company: 'Acme' } }),
+      log('goal-job', 14, { details: { role: 'Engineer' } }),
+      log('goal-job', 15), // skipped: no details
+    ]
+    expect(lastDetails(goal('goal-job'), logs)).toBe('Engineer')
+    expect(lastDetails(goal('goal-lifting'), logs)).toBe('')
   })
 })

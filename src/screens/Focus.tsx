@@ -2,7 +2,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { type ReactNode, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { Capture } from '../components/Capture'
-import { useDone } from '../components/DoneBanner'
+import { DoneBanner, useDone } from '../components/DoneBanner'
 import { BackIcon } from '../components/icons'
 import { TaskSheet } from '../components/TaskSheet'
 import { useUnfinishedPrompt } from '../components/UnfinishedSheet'
@@ -26,7 +26,7 @@ export function Focus() {
   const day = useDay(block?.date ?? isoDate(now))
   const [editing, setEditing] = useState<ID | null>(null)
   const [adding, setAdding] = useState(false)
-  const { banner, toggleTask, toggleBlock } = useDone()
+  const { toggleTask, toggleBlock, details } = useDone()
   // This block's unfinished tasks, once it has ended (today only: earlier days are Overdue on Home)
   const today = isoDate(now)
   const unfinished = useUnfinishedPrompt(today, block?.date === today ? day : undefined, now, { auto: false, blockId: id })
@@ -121,7 +121,8 @@ export function Focus() {
           + Add to this block
         </button>
       )}
-      {banner}
+      <DoneBanner />
+      {details.sheet}
       {editing && <TaskSheet taskId={editing} onClose={() => setEditing(null)} />}
       {adding && <Capture init={{ block }} onClose={() => setAdding(false)} />}
       {unfinished.sheet}

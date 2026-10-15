@@ -2,6 +2,8 @@ import 'fake-indexeddb/auto'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { goalNumber } from '../lib/progress'
 import { tickBlock, untickBlock } from './day'
+import { updateDetails } from './goals'
+import { completeTask, tickGoal, uncompleteTask } from './tasks'
 import { BriefDB } from './db'
 import { seed } from './seed'
 
@@ -41,5 +43,50 @@ describe('block goal ticks', () => {
     await tickBlock('focus', { now, db })
     await tickBlock('missing', { now, db })
     expect(await db.logEntries.count()).toBe(0)
+  })
+})
+
+describe('detail fields on tick', () => {
+  const task = (id: string, extra: object) =>
+    db.tasks.add({ id, title: id, estimate: 30, areaId: 'area-focus', status: 'backlog', rollovers: 0, delegable: false, createdAt: now.toISOString(), ...extra })
+
+  it('a block tick stores its details; Skip (none) still logs; untick takes them away', async () => {
+    await tickBlock('gym', { details: { lift: 'Snatch', weight: '80kg' }, now, db })
+    expect((await db.logEntries.toArray())[0].details).toEqual({ lift: 'Snatch', weight: '80kg' })
+    await untickBlock('gym', db)
+    await tickBlock('gym', { now, db })
+    const [entry] = await db.logEntries.toArray()
+    expect(entry.goalId).toBe('goal-lifting')
+    expect(entry.details).toBeUndefined()
+  })
+
+  it('tickGoal names the goal that will be logged, so the form only asks when it counts', async () => {
+    await task('apply', { goalId: 'goal-job' })
+    await task('in-gym', { goalId: 'goal-lifting', status: 'scheduled', date: '2026-10-13', blockId: 'gym' })
+    await task('loose', {})
+    expect((await tickGoal('apply', db))?.detailFields).toEqual(['role', 'company'])
+    expect(await tickGoal('in-gym', db)).toBeUndefined() // the Gym block tick covers it
+    expect(await tickGoal('loose', db)).toBeUndefined()
+  })
+
+  it('Did it logs as of the block end; undo removes the entry with its details', async () => {
+    await task('apply', { goalId: 'goal-job', status: 'scheduled', date: '2026-10-13', blockId: 'focus' })
+    const end = new Date(2026, 9, 13, 12)
+    await completeTask('apply', { details: { role: 'Analyst' }, now: end, db })
+    const [entry] = await db.logEntries.toArray()
+    expect(entry).toMatchObject({ completedAt: end.toISOString(), details: { role: 'Analyst' } })
+    expect((await db.tasks.get('apply'))!.rollovers).toBe(0)
+    await uncompleteTask('apply', db)
+    expect(await db.logEntries.count()).toBe(0)
+    expect((await db.tasks.get('apply'))!.status).toBe('scheduled')
+  })
+
+  it('details can be filled in later; when and what never change', async () => {
+    await tickBlock('gym', { now, db })
+    const [before] = await db.logEntries.toArray()
+    await updateDetails(before.id, { lift: 'Clean & jerk', weight: '100kg' }, db)
+    expect(await db.logEntries.get(before.id)).toEqual({ ...before, details: { lift: 'Clean & jerk', weight: '100kg' } })
+    await updateDetails(before.id, undefined, db)
+    expect(await db.logEntries.get(before.id)).toEqual(before)
   })
 })

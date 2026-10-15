@@ -1,27 +1,37 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useState } from 'react'
 import { db } from '../db/db'
-import { completeTask, deleteTask, type TaskPatch, uncompleteTask, updateTask } from '../db/tasks'
+import { deleteTask, type TaskPatch, uncompleteTask, updateTask } from '../db/tasks'
 import { isoDate } from '../lib/dates'
 import type { ID, Task } from '../types'
+import { useDone } from './DoneBanner'
 import { Sheet } from './Sheet'
 import { dayLabel, type Fields, type Link, type Refs, resolve, useRefs } from '../lib/task-fields'
 import { TaskFields } from './TaskFields'
 import { dangerBtn, input, primaryBtn, secondaryBtn } from './ui'
 
 // Edit a task: same chips as Capture, plus Mark done / Undo done and Delete (with confirm).
+// Mark done asks for the goal's details first, in place of the form.
 export function TaskSheet({ taskId, onClose }: { taskId: ID; onClose: () => void }) {
   const task = useLiveQuery(() => db.tasks.get(taskId), [taskId])
   const refs = useRefs()
   const [today] = useState(() => isoDate(new Date()))
+  const { doneTask, details } = useDone()
   if (!task || !refs) return null
+
+  if (details.asking)
+    return (
+      <Sheet title={`${details.asking.title} · details`} onClose={details.cancel}>
+        {details.form}
+      </Sheet>
+    )
 
   return (
     <Sheet title={task.status === 'done' ? 'Done' : 'Edit task'} onClose={onClose}>
       {task.status === 'done' ? (
         <DoneView task={task} today={today} onClose={onClose} />
       ) : (
-        <EditForm task={task} refs={refs} today={today} onClose={onClose} />
+        <EditForm task={task} refs={refs} today={today} onClose={onClose} onDone={() => doneTask(task)} />
       )}
     </Sheet>
   )
@@ -29,7 +39,19 @@ export function TaskSheet({ taskId, onClose }: { taskId: ID; onClose: () => void
 
 const linkOf = (t: Task): Link => (t.projectId ? { projectId: t.projectId } : t.goalId ? { goalId: t.goalId } : null)
 
-function EditForm({ task, refs, today, onClose }: { task: Task; refs: Refs; today: string; onClose: () => void }) {
+function EditForm({
+  task,
+  refs,
+  today,
+  onClose,
+  onDone,
+}: {
+  task: Task
+  refs: Refs
+  today: string
+  onClose: () => void
+  onDone: () => void
+}) {
   const [title, setTitle] = useState(task.title)
   const [fields, setFields] = useState<Fields>(() => ({
     estimate: task.estimate,
@@ -127,9 +149,7 @@ function EditForm({ task, refs, today, onClose }: { task: Task; refs: Refs; toda
       <button
         type="button"
         className={`${secondaryBtn} w-full`}
-        onClick={async () => {
-          await completeTask(task.id)
-        }}
+        onClick={onDone}
       >
         Mark done
       </button>

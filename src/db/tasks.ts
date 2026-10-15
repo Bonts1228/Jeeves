@@ -1,6 +1,7 @@
 import { isoDate } from '../lib/dates'
+import { loggedGoal } from '../lib/progress'
 import { nextDue } from '../lib/repeat'
-import type { ID, Repeat, Task } from '../types'
+import type { Goal, ID, Repeat, Task } from '../types'
 import { ensureBlocks, resolvePlacement, type Schedule } from './blocks'
 import { type BriefDB, db as defaultDb, newId } from './db'
 import { releaseWaiting } from './goals'
@@ -80,11 +81,29 @@ const successor = (db: BriefDB, id: ID) => db.tasks.where('prevId').equals(id).f
 
 const sameRepeat = (a?: Repeat, b?: Repeat) => JSON.stringify(a) === JSON.stringify(b)
 
+// What ticking a task logs against: the goal id (kept even if that goal row is gone) and the goal,
+// unless a served-by-blocks block covers it (lib/progress loggedGoal).
+async function tickTarget(db: BriefDB, task: Task): Promise<{ goalId?: ID; goal?: Goal }> {
+  const project = task.projectId ? await db.projects.get(task.projectId) : undefined
+  const goalId = task.goalId ?? project?.goalId
+  const goal = goalId ? await db.goals.get(goalId) : undefined
+  const block = task.blockId ? await db.blocks.get(task.blockId) : undefined
+  if (goal && !loggedGoal(task, goal, block)) return {}
+  return { goalId, goal }
+}
+
+// The goal ticking this task would log against, or undefined. The UI asks for its detail fields first.
+export async function tickGoal(id: ID, db: BriefDB = defaultDb): Promise<Goal | undefined> {
+  const task = await db.tasks.get(id)
+  return task && (await tickTarget(db, task)).goal
+}
+
 // Ticking done is the only completion signal. Writes a LogEntry against the task's goal (or its
 // project's goal) and, for a repeating task, creates the next occurrence. A task has at most one
 // next occurrence (linked by prevId), so completing twice or complete → undo → complete never duplicates.
 // A goal served by blocks counts its blocks: a task done in one of its area's blocks is covered by
 // the block tick, so its entry doesn't count against the goal. Done anywhere else, it counts.
+// now: when it was done ("Did it" on the Unfinished sheet logs as of the block's end).
 export async function completeTask(
   id: ID,
   { details, now = new Date(), db = defaultDb }: { details?: Record<string, string>; now?: Date; db?: BriefDB } = {},
@@ -93,13 +112,7 @@ export async function completeTask(
     const task = await db.tasks.get(id)
     if (!task || task.status === 'done' || task.status === 'deleted') return
 
-    const project = task.projectId ? await db.projects.get(task.projectId) : undefined
-    let goalId = task.goalId ?? project?.goalId
-    const goal = goalId ? await db.goals.get(goalId) : undefined
-    if (goal?.servedByBlocks && task.status === 'scheduled' && task.blockId) {
-      const block = await db.blocks.get(task.blockId)
-      if (block?.areaId === goal.areaId) goalId = undefined
-    }
+    const { goalId } = await tickTarget(db, task)
     await db.tasks.update(id, { status: 'done' })
     await db.logEntries.add({
       id: newId(),

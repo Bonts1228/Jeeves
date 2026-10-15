@@ -1,4 +1,5 @@
-import type { Goal, LogEntry, Project, Task } from '../types'
+import type { Block, Goal, ISODate, LogEntry, Project, Task } from '../types'
+import { isoDate, parseISODate } from './dates'
 
 // Progress is computed, never stored: log entries for a goal in its current period, against target.
 
@@ -16,6 +17,35 @@ function periodEnd(period: 'week' | 'month', now: Date): Date {
   return period === 'month'
     ? new Date(start.getFullYear(), start.getMonth() + 1, 1)
     : new Date(start.getFullYear(), start.getMonth(), start.getDate() + 7)
+}
+
+const DAY_MS = 86_400_000
+const daysBetween = (a: Date, b: Date) => Math.round((b.getTime() - a.getTime()) / DAY_MS) // whole days, DST-safe
+
+// How many entries an even pace has by the end of date (or by its start, if !inclusive), in the
+// period holding date. Brief rule 2.3 plans through the brief date; the Backlog counts finished days.
+export function expectedBy(target: number, period: 'week' | 'month', date: ISODate, inclusive = true): number {
+  const d = parseISODate(date)
+  const start = periodStart(period, d)
+  const days = daysBetween(start, periodEnd(period, d))
+  const elapsed = daysBetween(start, d) + (inclusive ? 1 : 0)
+  return Math.ceil((target * elapsed) / days)
+}
+
+// Days left in the current period, today included: "3 days left", "last day".
+export function periodLeft(period: 'week' | 'month', now: Date): string {
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const n = daysBetween(today, periodEnd(period, now))
+  return n <= 1 ? 'last day' : `${n} days left`
+}
+
+// The pace line under a goal with a target: "1 behind · 3 days left". Behind only shows when it is
+// (a number, never a colour); on pace or ahead there's just the days left.
+export function paceLabel(goal: Goal, logs: LogEntry[], now = new Date()): string | null {
+  const progress = goalProgress(goal, logs, now)
+  if (!progress || !goal.period) return null
+  const behind = expectedBy(progress.target, goal.period, isoDate(now), false) - progress.done
+  return [behind > 0 && `${behind} behind`, periodLeft(goal.period, now)].filter(Boolean).join(' · ')
 }
 
 // For goals with a target and period: { done, target }. Otherwise null (set paths count steps instead).
@@ -58,3 +88,36 @@ export function projectNumber(project: Project, tasks: Task[]): string {
 
 const stepCount = (steps: Task[]) =>
   `${steps.filter((t) => t.status === 'done').length} of ${steps.length} step${steps.length === 1 ? '' : 's'}`
+
+// The goal a tick logs against: the task's own goal, else its project's (goal: that one, looked up).
+// A task done inside a block of its served-by-blocks goal's area logs none: the block tick covers it.
+export function loggedGoal(task: Task, goal: Goal | undefined, block: Block | undefined): Goal | undefined {
+  const inBlock = (b?: Block): b is Block => task.status === 'scheduled' && !!b && b.id === task.blockId
+  if (goal?.servedByBlocks && inBlock(block) && block.areaId === goal.areaId) return undefined
+  return goal
+}
+
+// The details a goal records ("role", "company"), or none.
+export const detailFieldsOf = (goal: Goal | undefined): string[] => goal?.detailFields ?? []
+
+// Only the fields filled in; nothing at all if none were.
+export function cleanDetails(values: Record<string, string>): Record<string, string> | undefined {
+  const kept = Object.entries(values)
+    .map(([k, v]) => [k, v.trim()] as const)
+    .filter(([, v]) => v)
+  return kept.length ? Object.fromEntries(kept) : undefined
+}
+
+// "Analyst, Acme": an entry's details in the goal's field order.
+export function detailsText(goal: Goal, details?: Record<string, string>): string {
+  if (!details) return ''
+  const order = [...detailFieldsOf(goal), ...Object.keys(details).filter((k) => !detailFieldsOf(goal).includes(k))]
+  return order.flatMap((k) => (details[k] ? [details[k]] : [])).join(', ')
+}
+
+// The latest entry with details, for "Last: Snatch, 80kg" on the Backlog.
+export function lastDetails(goal: Goal, logs: LogEntry[]): string {
+  const withDetails = logs.filter((l) => l.goalId === goal.id && l.details)
+  const last = withDetails.sort((a, b) => a.completedAt.localeCompare(b.completedAt)).at(-1)
+  return detailsText(goal, last?.details)
+}

@@ -2,7 +2,7 @@ import { blockRoom } from '../db/blocks'
 import type { Area, Block, Goal, ID, ISODate, LogEntry, Minutes, Project, Repeat, Settings, Task } from '../types'
 import { addDays, dayMonth, isoDate, parseISODate, weekdayOf } from './dates'
 import { isHeldBack } from './holdback'
-import { periodStart } from './progress'
+import { expectedBy, periodStart } from './progress'
 import { blockEnded } from './unfinished'
 import { blockMinutes, formatDuration, toMinutes, WEEKDAY_SHORT } from './time'
 
@@ -66,7 +66,7 @@ const OVERDUE = 'Overdue from '
 export const isOverdueReason = (reason?: string) => reason === CARRIED || !!reason?.startsWith(OVERDUE)
 export const isCarriedReason = (reason?: string) => reason === CARRIED
 
-const cadence = (r: Repeat) => (r.kind === 'weekly' ? 'weekly' : `every ${r.days} day${r.days === 1 ? '' : 's'}`)
+export const cadence = (r: Repeat) => (r.kind === 'weekly' ? 'weekly' : `every ${r.days} day${r.days === 1 ? '' : 's'}`)
 
 const byOrder = (a: Task, b: Task) => (a.order ?? Infinity) - (b.order ?? Infinity) || a.createdAt.localeCompare(b.createdAt)
 const oldestFirst = (a: Task, b: Task) => a.createdAt.localeCompare(b.createdAt)
@@ -112,9 +112,7 @@ export function rankCandidates(input: BriefInput): Candidate[] {
   for (const g of goals) {
     if (g.type !== 'recurring' || g.servedByBlocks || !g.target || !g.period) continue
     const start = periodStart(g.period, parseISODate(date))
-    const days = g.period === 'week' ? 7 : new Date(start.getFullYear(), start.getMonth() + 1, 0).getDate()
-    const elapsed = Math.round((parseISODate(date).getTime() - start.getTime()) / 86_400_000) + 1
-    const expected = Math.ceil((g.target * elapsed) / days)
+    const expected = expectedBy(g.target, g.period, date)
     const logged = logs.filter(
       (l) => l.goalId === g.id && l.completedAt >= start.toISOString() && l.completedAt < parseISODate(end).toISOString(),
     ).length

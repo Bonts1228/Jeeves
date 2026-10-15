@@ -137,6 +137,11 @@ describe('export / import', () => {
       ['bad settings', () => variant((f) => delete f.settings.capacity[3]), 'Settings are missing or incomplete.'],
       ['bad notBefore', () => variant((f) => (f.tables.projects[1].notBefore = '2 Nov')), 'Project “Job search setup” has an invalid notBefore.'],
       [
+        'details that are not text',
+        () => variant((f) => f.tables.logEntries.push({ id: 'bad', completedAt: now.toISOString(), details: { weight: 80 } })),
+        /^Log entry \d+ has invalid details\.$/,
+      ],
+      [
         'waits on a missing project',
         () => variant((f) => (f.tables.projects[1].startsAfterProjectId = 'gone')),
         "Project “Job search setup” waits on a project that isn't in the file.",

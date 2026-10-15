@@ -97,3 +97,14 @@ export async function deleteGoalOrProject(
     }
   })
 }
+
+// Fill in or change a log entry's details afterwards (a skipped form, a typo). Only details change:
+// never when it was done or what it counts against. Undefined clears them.
+export async function updateDetails(logId: ID, details: Record<string, string> | undefined, db: BriefDB = defaultDb) {
+  await db.transaction('rw', db.logEntries, async () => {
+    const entry = await db.logEntries.get(logId)
+    if (!entry) return
+    const { details: _, ...rest } = entry
+    await db.logEntries.put(details ? { ...rest, details } : rest)
+  })
+}

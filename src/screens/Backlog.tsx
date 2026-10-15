@@ -6,10 +6,11 @@ import { ProjectSheet } from '../components/ProjectSheet'
 import { TaskSheet } from '../components/TaskSheet'
 import { secondaryBtn } from '../components/ui'
 import { db } from '../db/db'
-import { isoDate } from '../lib/dates'
+import { dayMonth, isoDate } from '../lib/dates'
 import { heldBackLabel, isHeldBack } from '../lib/holdback'
-import { goalNumber, nextStep, projectNumber } from '../lib/progress'
+import { goalNumber, lastDetails, nextStep, paceLabel, projectNumber } from '../lib/progress'
 import { taskFacts } from '../lib/task-fields'
+import { useNow } from '../lib/use-now'
 import type { Goal, GoalType, Task } from '../types'
 
 const GOAL_TYPE: Record<GoalType, string> = {
@@ -23,7 +24,7 @@ const GOAL_TYPE: Record<GoalType, string> = {
 export function Backlog() {
   const [editing, setEditing] = useState<string | null>(null)
   const [creating, setCreating] = useState<'goal' | 'project' | null>(null)
-  const [now] = useState(() => new Date())
+  const now = useNow() // the period rolls over at midnight
   const inboxCount = useLiveQuery(() => db.inbox.count())
   const areas = useLiveQuery(() => db.areas.toArray())
   const goals = useLiveQuery(() => db.goals.toArray())
@@ -49,6 +50,12 @@ export function Backlog() {
           : `${own.filter(isOpen).length} open`
     return [GOAL_TYPE[g.type], detail].filter(Boolean).join(' · ')
   }
+  // Under the goal: its numbers (pace against target, time left, deadline), then the latest details
+  const goalNotes = (g: Goal) => {
+    const numbers = [paceLabel(g, logs, now), g.deadline && `By ${dayMonth(g.deadline)}`].filter(Boolean).join(' · ')
+    const last = lastDetails(g, logs)
+    return [numbers, last && `Last: ${last}`].filter(Boolean)
+  }
 
   return (
     <div className="space-y-6">
@@ -59,7 +66,14 @@ export function Backlog() {
 
       <Group title="Goals">
         {goals.map((g) => (
-          <Row key={g.id} title={g.title} sub={goalSub(g)} value={goalNumber(g, tasks, logs, now)} to={`/goals/${g.id}`} />
+          <Row
+            key={g.id}
+            title={g.title}
+            sub={goalSub(g)}
+            notes={goalNotes(g)}
+            value={goalNumber(g, tasks, logs, now)}
+            to={`/goals/${g.id}`}
+          />
         ))}
       </Group>
 
@@ -126,12 +140,14 @@ function Group({ title, children }: { title: string; children: ReactNode }) {
 function Row({
   title,
   sub,
+  notes = [],
   value,
   onClick,
   to,
 }: {
   title: string
   sub?: string
+  notes?: string[]
   value?: string
   onClick?: () => void
   to?: string
@@ -141,6 +157,11 @@ function Row({
       <div className="min-w-0 flex-1">
         <p className="font-medium">{title}</p>
         {sub && <p className="truncate text-sm text-stone-500">{sub}</p>}
+        {notes.map((n) => (
+          <p key={n} className="truncate text-sm tabular-nums text-stone-500">
+            {n}
+          </p>
+        ))}
       </div>
       {value && <span className="shrink-0 tabular-nums text-sm text-stone-500">{value}</span>}
     </>

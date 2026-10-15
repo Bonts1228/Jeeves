@@ -1,10 +1,11 @@
 import { Link, Outlet, useLocation } from 'react-router-dom'
 import { BottomBar } from './BottomBar'
+import { DoneBanner } from './DoneBanner'
 import { GearIcon } from './icons'
 
 const TITLES: Record<string, string> = { '/': 'Plan', '/backlog': 'Backlog', '/inbox': 'Inbox' }
 
-// Main screens: header with Settings link, content, bottom bar.
+// Main screens: header with Settings link, content, bottom bar, and the app's Done/Undo banner.
 export function Layout() {
   const { pathname } = useLocation()
   return (
@@ -23,6 +24,7 @@ export function Layout() {
         <Outlet />
       </main>
       <BottomBar />
+      <DoneBanner aboveBar />
     </div>
   )
 }

@@ -32,7 +32,7 @@ export function Plan() {
   const [editing, setEditing] = useState<ID | null>(null)
   const [editingBlocks, setEditingBlocks] = useState(false)
   const [addingTo, setAddingTo] = useState<Block | null>(null)
-  const { banner, toggleTask, toggleBlock } = useDone({ aboveBar: true })
+  const { toggleTask, toggleBlock, details } = useDone()
   const unfinished = useUnfinishedPrompt(today, day, now, { auto: !!day })
   const unfinishedCount = unfinished.count
 
@@ -197,7 +197,7 @@ export function Plan() {
           )
         })}
       </ul>
-      {banner}
+      {details.sheet}
       {editing && <TaskSheet taskId={editing} onClose={() => setEditing(null)} />}
       {unfinished.sheet}
       {addingTo && <Capture init={{ block: addingTo }} onClose={() => setAddingTo(null)} />}

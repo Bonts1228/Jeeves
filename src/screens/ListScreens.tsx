@@ -2,17 +2,21 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { type ReactNode, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Capture } from '../components/Capture'
+import { DetailsForm } from '../components/DetailsForm'
 import { GoalSheet } from '../components/GoalSheet'
+import { DoneBanner } from '../components/DoneBanner'
 import { BackIcon } from '../components/icons'
 import { ProjectSheet } from '../components/ProjectSheet'
+import { Sheet } from '../components/Sheet'
 import { TaskSheet } from '../components/TaskSheet'
 import { secondaryBtn } from '../components/ui'
 import { db } from '../db/db'
+import { updateDetails } from '../db/goals'
 import { moveStep, type StepList, stepsOf } from '../db/steps'
 import { isoDate } from '../lib/dates'
-import { goalProgress } from '../lib/progress'
-import { dayLabel, taskFacts } from '../lib/task-fields'
-import type { Task } from '../types'
+import { detailFieldsOf, detailsText, goalProgress } from '../lib/progress'
+import { capitalise, dayLabel, taskFacts } from '../lib/task-fields'
+import type { Goal, LogEntry, Task } from '../types'
 
 const GOAL_TYPE = { set_path: 'Set path', open_path: 'Open path', recurring: 'Recurring' }
 
@@ -55,14 +59,75 @@ export function GoalScreen() {
       )}
       {goal.servedByBlocks && goal.type === 'recurring' ? (
         <p className="rounded-xl bg-white p-4 text-sm text-stone-600">
-          Each {area?.name ?? ''} block you tick counts one. Ticking blocks arrives with the day view (M4), so this stays
-          at 0 until then.
+          Each {area?.name ?? ''} block you tick counts one. Tasks for it count when done outside those blocks.
         </p>
       ) : (
         <Steps list={{ goalId: goal.id }} ordered={ordered} />
       )}
+      <Recent goal={goal} logs={logs} today={today} />
       {editing && <GoalSheet goal={goal} onClose={() => setEditing(false)} onDeleted={() => navigate('/backlog')} />}
     </Page>
+  )
+}
+
+const RECENT = 10
+
+// The latest log entries for a goal: when, what (task or block) and its details. With detail fields,
+// tapping an entry edits its details (fill in a skipped form); when and what never change here.
+function Recent({ goal, logs, today }: { goal: Goal; logs: LogEntry[]; today: string }) {
+  const recent = [...logs].sort((a, b) => b.completedAt.localeCompare(a.completedAt)).slice(0, RECENT)
+  const what = useLiveQuery(async () => {
+    const tasks = await db.tasks.bulkGet(recent.flatMap((l) => (l.taskId ? [l.taskId] : [])))
+    const blocks = await db.blocks.bulkGet(recent.flatMap((l) => (l.blockId ? [l.blockId] : [])))
+    return new Map([
+      ...tasks.flatMap((t) => (t ? [[t.id, t.title] as const] : [])),
+      ...blocks.flatMap((b) => (b ? [[b.id, `Block ${b.start}–${b.end}`] as const] : [])),
+    ])
+  }, [recent.map((l) => l.id).join()])
+  const [editing, setEditing] = useState<LogEntry | null>(null)
+  if (!recent.length || !what) return null
+  const fields = detailFieldsOf(goal).length > 0
+
+  return (
+    <section>
+      <h2 className="mb-2 text-sm font-semibold tracking-wide text-stone-500 uppercase">Recent</h2>
+      <ul className="divide-y divide-stone-100 rounded-xl bg-white">
+        {recent.map((l) => {
+          const when = capitalise(dayLabel(isoDate(new Date(l.completedAt)), today))
+          const source = what.get(l.taskId ?? l.blockId ?? '')
+          const content = (
+            <>
+              <span className="block font-medium">{detailsText(goal, l.details) || (fields ? 'No details' : 'Done')}</span>
+              <span className="block truncate text-sm text-stone-500">{[when, source].filter(Boolean).join(' · ')}</span>
+            </>
+          )
+          return (
+            <li key={l.id}>
+              {fields ? (
+                <button type="button" className="block min-h-14 w-full px-4 py-2 text-left active:bg-stone-50" onClick={() => setEditing(l)}>
+                  {content}
+                </button>
+              ) : (
+                <div className="min-h-14 px-4 py-2">{content}</div>
+              )}
+            </li>
+          )
+        })}
+      </ul>
+      {editing && (
+        <Sheet title={`${goal.title} · details`} onClose={() => setEditing(null)}>
+          <DetailsForm
+            goal={goal}
+            initial={editing.details}
+            onSave={async (details) => {
+              await updateDetails(editing.id, details)
+              setEditing(null)
+            }}
+            onCancel={() => setEditing(null)}
+          />
+        </Sheet>
+      )}
+    </section>
   )
 }
 
@@ -112,6 +177,7 @@ function Page({ title, onEdit, children }: { title: string; onEdit: () => void; 
         )}
       </header>
       <main className="space-y-4 px-4 pt-1">{children}</main>
+      <DoneBanner />
     </div>
   )
 }

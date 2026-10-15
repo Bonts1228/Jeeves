@@ -1,7 +1,6 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useEffect, useState } from 'react'
 import { ensureBlocks } from '../db/blocks'
-import { tickBlock } from '../db/day'
 import {
   dismissedUnfinished,
   dismissUnfinished,
@@ -17,12 +16,14 @@ import { formatDuration, WEEKDAY_SHORT } from '../lib/time'
 import { blockEndAt, promptIds, type UnfinishedGroup, unfinishedGroups } from '../lib/unfinished'
 import type { Block, Goal, ID, ISODate, LogEntry, Task } from '../types'
 import { DayBlocksSheet } from './DayBlocksSheet'
+import { useDone } from './DoneBanner'
 import { MoveForm } from './MoveSheet'
 import { anySheetOpen, Sheet } from './Sheet'
 import { secondaryBtn } from './ui'
 
 // Unfinished at block end: one sheet for every ended (or deleted) block with open tasks, a card per
-// task with Next block / Pick a block / Back to Backlog. Each counts a rollover. An ended block whose
+// task with Next block / Pick a block / Back to Backlog. Each counts a rollover. Did it ticks the task
+// as of the block's end, no rollover (details first if its goal records them). An ended block whose
 // goal is unticked asks "did you train?": Done ticks it as of the block's end, Skipped drops it, Move
 // session drops it for a later block (or a new one) that asks in turn. Closing it (Later,
 // backdrop, Escape) leaves the tasks as they are; the caller remembers them as dismissed.
@@ -42,6 +43,7 @@ export function UnfinishedSheet({
   const [picking, setPicking] = useState<Task | null>(null)
   const [newSession, setNewSession] = useState<Block | null>(null) // the ended goal block a new block is for
   const [errors, setErrors] = useState<Record<ID, string>>({})
+  const { doneTask, tickGoalBlock, details } = useDone()
   const tasks = groups.flatMap((g) => g.tasks)
   const goalBlocks = groups.flatMap((g) => (g.goal && g.block ? [g.block] : []))
   const ids = [...tasks, ...goalBlocks].map((x) => x.id).join()
@@ -67,6 +69,13 @@ export function UnfinishedSheet({
   const areaName = (id: ID) => refs.areas.find((a) => a.id === id)?.name ?? 'Area'
   const manual = (t: Task) => !!refs.projects.find((p) => p.id === t.projectId)?.manualOnly
   const where = (b: Block) => (b.date === today ? b.start : `${WEEKDAY_SHORT[weekdayOf(b.date)]} ${b.start}`)
+
+  if (details.asking)
+    return (
+      <Sheet title={`${details.asking.title} · details`} onClose={details.cancel}>
+        {details.form}
+      </Sheet>
+    )
 
   if (newSession)
     return (
@@ -110,17 +119,29 @@ export function UnfinishedSheet({
                   where={where}
                   areaName={areaName(g.block.areaId)}
                   onNewBlock={() => setNewSession(g.block!)}
+                  onDone={() => tickGoalBlock(g.block!, g.goal!, { now: blockEndAt(g.block!) })}
                 />
               )}
               {g.tasks.map((t) => {
                 const dest = next.get(t.id)
                 return (
                   <li key={t.id} className="rounded-xl bg-stone-100 p-3">
-                    <p className="font-medium">{t.title}</p>
-                    <p className="text-sm text-stone-500">
-                      {formatDuration(t.estimate)}
-                      {t.reason && ` · ${t.reason}`}
-                    </p>
+                    <div className="flex items-start gap-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="font-medium">{t.title}</p>
+                        <p className="text-sm text-stone-500">
+                          {formatDuration(t.estimate)}
+                          {t.reason && ` · ${t.reason}`}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        className={`${secondaryBtn} shrink-0 px-3 text-sm`}
+                        onClick={() => doneTask(t, { now: g.block ? blockEndAt(g.block) : now })}
+                      >
+                        Did it
+                      </button>
+                    </div>
                     <div className="mt-2 grid grid-cols-3 gap-2">
                       <button
                         type="button"
@@ -163,7 +184,7 @@ export function UnfinishedSheet({
   )
 }
 
-// A block goal left unticked: Done (logged as of the block's end), Skipped, or Move session to the
+// A block goal left unticked: Done (logged as of the block's end, details first), Skipped, or Move session to the
 // next same-area block (to) or a new one. Moving logs nothing: the goal counts when a block is ticked.
 function GoalCard({
   goal,
@@ -172,6 +193,7 @@ function GoalCard({
   where,
   areaName,
   onNewBlock,
+  onDone,
 }: {
   goal: Goal
   block: Block
@@ -179,13 +201,14 @@ function GoalCard({
   where: (b: Block) => string
   areaName: string
   onNewBlock: () => void
+  onDone: () => void
 }) {
   const [moving, setMoving] = useState(false)
   return (
     <li className="rounded-xl bg-stone-100 p-3">
       <p className="font-medium">{goal.title} · did you train?</p>
       <div className="mt-2 grid grid-cols-3 gap-2">
-        <button type="button" className={`${secondaryBtn} px-1 text-sm`} onClick={() => tickBlock(block.id, { now: blockEndAt(block) })}>
+        <button type="button" className={`${secondaryBtn} px-1 text-sm`} onClick={onDone}>
           Done
         </button>
         <button type="button" className={`${secondaryBtn} px-1 text-sm`} onClick={() => skipBlockGoal(block.date, block.id)}>

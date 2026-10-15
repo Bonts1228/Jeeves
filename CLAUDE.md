@@ -162,6 +162,16 @@ Clarified in M5 (`src/lib/unfinished.ts`, `src/db/unfinished.ts`, `src/db/day-bl
 - **Sheets** close by backdrop, Escape, Later/Close, or a swipe down on the handle/title (a quarter of the height or a fast flick), all the same way.
 - `ensureBlocks` marks a made day in `meta` `blocks:<date>` so a day edited down to no template blocks isn't remade; import clears these flags.
 
+Clarified in M6 (`src/lib/progress.ts`, `src/lib/replan.ts`, `src/db/replan.ts`, `src/components/DetailsForm.tsx`, `src/components/DoneBanner.tsx`):
+
+- **Backlog numbers:** a goal with target and period shows "2 of 5 this week" and under it "1 behind · 4 days left · By 31 Dec". Behind = the even-pace count by the start of today (`expectedBy`, shared with rule 2.3) minus what's logged; shown only when behind. Goals with detail fields add "Last: Analyst, Acme".
+- **Details on tick:** the form shows before the LogEntry is written when the goal the tick logs against (`loggedGoal`: none for a task covered by its served-by-blocks block) has `detailFields`: Home, Focus, task sheet Mark done, Unfinished (Did it, "did you train?" Done). Save logs the filled-in fields, Skip logs with no details, cancelling (backdrop, Escape, swipe) ticks nothing. Last values show as placeholders. Undo removes the entry with its details.
+- **Recent** on the goal screen: the last 10 entries (when, task or block, details). With detail fields, tap one to edit its details; time and goal never change.
+- **Did it** on Unfinished task cards: done as of the block's end (now, if the block was deleted), no rollover.
+- **Banner:** app-wide Undo banners (`src/lib/banners.ts`), shown by Layout, Focus and the goal/project screens, so they outlive the sheet that raised them. One slot per kind (`replan`, `done`), each on its own ~6s clock: a tick never wipes a showing re-plan Undo (it stacks under it); a new banner replaces only its own kind.
+- **Urgent capture** (Capture or Inbox → task, due today, no block or schedule picked): the first remaining (not ended) non-protected block of its area (any area for manual-only) with room; else the first where moving out its lowest-ranked tasks (end of the block's order first; any taken but not needed go back) makes room. Never moved: done, overdue/carried, due today or earlier, "Added by you", the current task of the running block. Moved tasks (highest-ranked first) go to another remaining block of their area with room while the day (scheduled + done) stays within capacity, else to the Backlog; no rollover, reason kept. The urgent task's reason is "Due today" and it may go over capacity. Capture shows "Due today: X → Work 14:00 · moved Y → 16:00" with Undo; closing the sheet carries it to the banner (~6s). Undo restores the snapshot in one transaction (moved tasks exactly, Inbox item back, new task removed); anything changed since is left alone and named. Fits nowhere: saved to the Backlog due today, nothing moved, "Not placed: no Work block left today with 1h free" with Pick a block. Editing a task's due date to today doesn't re-plan.
+- No schema change: `details` existed; import now rejects details that aren't text.
+
 Other rules:
 
 - **Repeating tasks:** ticking done creates the next occurrence: a copy with a new id, `status: 'backlog'`, `rollovers: 0`, and `due` set to completion date + N days (`every`), or the given weekday strictly after the later of completion date and old due date (`weekly`, so finishing Sat for a Sun task goes to the following Sun). Only done creates the next one. Delete ends the series, and Back to Backlog keeps the same occurrence. A task has at most one next occurrence (`prevId`), so ticking twice or tick → undo → tick never duplicates. **Undo done** reopens the task (`scheduled` if it has a date, else `backlog`), removes its latest LogEntry, and removes the next occurrence if it is still open (a done or deleted one stays). Repeating tasks enter the brief only through rules 2.1/2.2. Reason shows the cadence: "Due Sun · weekly".
@@ -170,9 +180,9 @@ Other rules:
 - **Project hold-back:** a project is held back while `notBefore` is after the date (the brief date, or today in the Backlog) or while `startsAfterProjectId` is set. Held-back projects stay out of rules 2.3–2.5; their overdue and due steps still rank via 2.1/2.2, and you can add steps yourself. The Backlog shows them last under **Later** with why ("Not before 2 Nov", "After X"); if X has an open repeating step it shows "After X (X repeats, won't finish)" so you can clear the wait by hand. `startsAfterProjectId` clears when X's last open step is done, deleted or moved out, or X is deleted; saving it against an X with nothing open doesn't keep it; undo done doesn't bring it back. The picker leaves out the project itself, manual-only projects and anything that would form a loop. Import rejects a bad `notBefore`, a missing X, and loops of any length.
 - **Deleting a goal or project** confirms first with counts: open tasks are kept as loose Backlog tasks or deleted, as chosen; done tasks stay as history, unlinked; projects feeding a deleted goal stay, unlinked; projects waiting on a deleted project start. Log entries are never touched (nor by target/period edits: progress recomputes).
 - **Block goals:** each block in a `servedByBlocks` goal's area gets a Done tick (detail form first if the goal has `detailFields`). It writes a LogEntry with `blockId` and `goalId`.
-- **Unfinished at block end:** prompt per task with three buttons — **Next block** (same area), **Pick a block**, **Back to Backlog**. Each increments `rollovers`. Still unscheduled at end of day → Overdue.
+- **Unfinished at block end:** prompt per task with three buttons — **Next block** (same area), **Pick a block**, **Back to Backlog**. Each increments `rollovers`. **Did it** (M6) ticks it instead, no rollover. Still unscheduled at end of day → Overdue.
 - **Overdue:** visible on Home; prompt to reschedule or delete.
-- **Urgent capture:** a task due today re-runs step 3 for today's remaining blocks. Displaced tasks go back to the Backlog; show a banner with the reason and an Undo.
+- **Urgent capture:** a task due today re-runs step 3 for today's remaining blocks. Displaced tasks go to another remaining block or back to the Backlog; show a banner with the reason and an Undo (details under M6).
 - **Progress:** ticking a task writes a LogEntry. If its goal has `detailFields`, show a small skippable form first.
 
 ## PWA updates
@@ -187,7 +197,7 @@ Bottom bar on main screens: **Plan** · **+ (quick capture)** · **Backlog**.
 | --- | --- |
 | Home / day view | Scrollable list of today's blocks; "Up next" hero card with the next task and Start block; Overdue card |
 | Focus block | Block name and time left, goal link ("2 of 5 this week"), current task with Done, then the block's other tasks |
-| Unfinished prompt | Bottom sheet at block end: Next block / Pick a block / Back to Backlog |
+| Unfinished prompt | Bottom sheet at block end: Next block / Pick a block / Back to Backlog, or Did it |
 | Brief review | Tomorrow's tasks grouped by block, reason under each, remove (×), "+ Add from Backlog", Confirm brief |
 | Backlog | Inbox count, Goals with progress numbers, Projects with "n of m steps", held-back projects last under "Later" |
 | Capture | Bottom sheet: text input, chips for estimate / area / goal / due, To Inbox or Add to Backlog |
@@ -230,7 +240,7 @@ Not approved for building. Recorded so they aren't lost.
 - Do now / reorder within a block: today a block's order is derived from the brief's tiers.
 - Several steps per path per day: a per-goal/project setting so a short next step can follow one already placed that day (today the brief adds one step per path per day).
 - Project end date.
-- Calendar-style block picker (a day timeline to tap a block or drag out a new one) for Unfinished, Pick a block and Schedule. For the design pass.
+- Calendar-style block picker: a visual day schedule (timeline) to tap a block or drag out a new one, and to drop a new task into any block or straight onto today's schedule. Used by Capture, Unfinished, Pick a block and Schedule. For the design pass.
 - Follow-up nudges: ticking an outreach task creates a follow-up due in N days, cancelled if the outreach is marked replied.
 
 ## Out of scope — do not build

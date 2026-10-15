@@ -110,6 +110,14 @@ function checkHoldBack(projects: Row[]): string | null {
 
 const isObject = (v: unknown): v is Row => typeof v === 'object' && v !== null && !Array.isArray(v)
 
+// Log entry details (M6): if present, field names to text, as the details form writes them.
+function checkDetails(entries: Row[]): string | null {
+  const bad = entries.findIndex(
+    (e) => e.details !== undefined && !(isObject(e.details) && Object.values(e.details).every((v) => typeof v === 'string')),
+  )
+  return bad < 0 ? null : `Log entry ${bad + 1} has invalid details.`
+}
+
 export interface ImportSummary {
   exportedAt: string
   fromVersion: number
@@ -166,8 +174,8 @@ export function parseImport(text: string): ParsedImport {
     tables[name] = structuredClone(rows)
   }
 
-  const holdBack = checkHoldBack(tables.projects)
-  if (holdBack) return fail(holdBack)
+  const problem = checkHoldBack(tables.projects) ?? checkDetails(tables.logEntries)
+  if (problem) return fail(problem)
 
   migrateTables(tables, version as number)
   const file: ExportFile = {
