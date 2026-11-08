@@ -15,6 +15,7 @@ const now = new Date(2026, 9, 15, 12, 30)
 
 const task = (id: string, extra: Partial<Task> = {}): Task => ({
   id,
+  goalId: 'g-none', // no such goal row: not Housekeeping, so not manual-only
   title: id,
   estimate: 30,
   areaId: 'area-focus',

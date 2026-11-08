@@ -3,7 +3,7 @@
 // Created/due dates are relative to the day the seed runs; goal deadlines are fixed.
 
 import { isoDate } from '../lib/dates'
-import type { Area, BlockTemplate, Goal, Project, Settings, Task, Weekday } from '../types'
+import { type Area, type BlockTemplate, type Goal, HOUSEKEEPING_ID, type Project, type Settings, type Task, type Weekday } from '../types'
 
 export interface SeedData {
   settings: Settings
@@ -68,9 +68,9 @@ export function buildSeed(today = new Date()): SeedData {
     return { id: `tpl-${weekday}-${perDay[weekday]}`, weekday, areaId, start, end, protected: prot }
   })
 
+  // Core goals (M7): job acquisition, course progress, coding this app, gym; plus Housekeeping.
+  // goal-course and goal-code are placeholders until the owner sets real ones.
   const goals: Goal[] = [
-    { id: 'goal-jeeves', title: 'Launch Jeeves', type: 'set_path', areaId: AREA.focus, deadline: '2026-11-30' },
-    { id: 'goal-trellis', title: 'Launch Trellis', type: 'set_path', areaId: AREA.focus, deadline: '2026-12-31' },
     {
       id: 'goal-job',
       title: 'Secure a job',
@@ -81,6 +81,16 @@ export function buildSeed(today = new Date()): SeedData {
       deadline: '2026-12-31',
       detailFields: ['role', 'company'],
     },
+    {
+      id: 'goal-course',
+      title: 'CFA Level 1',
+      type: 'recurring',
+      areaId: AREA.focus,
+      target: 5,
+      period: 'week',
+      deadline: '2027-02-28',
+    },
+    { id: 'goal-code', title: 'Build Jeeves and Trellis', type: 'open_path', areaId: AREA.focus, deadline: '2026-12-31' },
     {
       // Runs as the Gym blocks (5 a week), not as tasks: each ticked Gym block counts once.
       id: 'goal-lifting',
@@ -93,61 +103,70 @@ export function buildSeed(today = new Date()): SeedData {
       servedByBlocks: true,
       detailFields: ['lift', 'weight'],
     },
+    { id: HOUSEKEEPING_ID, title: 'Housekeeping', type: 'open_path', areaId: AREA.focus, isHousekeeping: true },
   ]
 
   const projects: Project[] = [
-    { id: 'proj-housekeeping', title: 'Housekeeping', areaId: AREA.focus, manualOnly: true },
-    { id: 'proj-job-setup', title: 'Job search setup', areaId: AREA.focus, goalId: 'goal-job' },
+    { id: 'proj-job-setup', title: 'Job search setup', goalId: 'goal-job' },
+    { id: 'proj-cfa-units', title: 'CFA L1 units', goalId: 'goal-course' },
+    { id: 'proj-jeeves', title: 'Jeeves Iteration 2', goalId: 'goal-code' },
+    { id: 'proj-trellis', title: 'Launch Trellis', goalId: 'goal-code' },
+    { id: 'proj-motorbike', title: 'Sell motorbike', goalId: HOUSEKEEPING_ID },
   ]
+  const goalOf = new Map(projects.map((p) => [p.id, p.goalId]))
 
-  // [title, estimate, area, extras]
+  // [title, estimate, goal or project, extras]. A project task takes its project's goal.
   type Row = [string, number, string, Partial<Task>?]
-  const jeeves = (title: string, hours: number, order: number): Row => [
+  const step = (projectId: string) => (title: string, estimate: number, order: number): Row => [
     title,
-    hours * 60,
-    AREA.focus,
-    { goalId: 'goal-jeeves', order },
+    estimate,
+    projectId,
+    { order },
   ]
+  const jeeves = step('proj-jeeves')
+  const cfa = step('proj-cfa-units')
+  const job = step('proj-job-setup')
+  const bike = step('proj-motorbike')
   const rows: Row[] = [
-    // Set path: Launch Jeeves, ordered milestones
-    jeeves('M2 Backlog + capture (1/2)', 3, 1),
-    jeeves('M2 Backlog + capture (2/2)', 3, 2),
-    jeeves('M3 Brief (1/2)', 3, 3),
-    jeeves('M3 Brief (2/2)', 3, 4),
-    jeeves('M4 Day + focus block (1/2)', 3, 5),
-    jeeves('M4 Day + focus block (2/2)', 3, 6),
-    jeeves('M5 Unfinished + overdue', 4, 7),
-    jeeves('M6 Progress + re-plan', 4, 8),
-    jeeves('Two-week self-test', 1, 9),
-    jeeves('Launch', 3, 10),
-    // Set path: Launch Trellis
-    ['Scope Trellis MVP', 120, AREA.focus, { goalId: 'goal-trellis', order: 1 }],
-    // Open path: job applications
-    ...Array.from({ length: 20 }, (_, i): Row => [`Application #${i + 1}`, 40, AREA.focus, { goalId: 'goal-job' }]),
-    // Project: Job search setup, ordered steps feeding Secure a job
-    ['Update CV', 120, AREA.focus, { projectId: 'proj-job-setup', order: 1 }],
-    ['Refresh LinkedIn', 60, AREA.focus, { projectId: 'proj-job-setup', order: 2 }],
-    ['Build target list of firms', 120, AREA.focus, { projectId: 'proj-job-setup', order: 3 }],
-    ['Set up application tracker', 30, AREA.focus, { projectId: 'proj-job-setup', order: 4 }],
-    ['Recruiter outreach – first 10', 60, AREA.focus, { projectId: 'proj-job-setup', order: 5 }],
-    // Project: Housekeeping (manual-only)
-    ['Do laundry', 45, AREA.focus, { projectId: 'proj-housekeeping', due: due(1), repeat: { kind: 'every', days: 8 } }],
-    [
-      'Plan meals for the week',
-      30,
-      AREA.focus,
-      { projectId: 'proj-housekeeping', due: due(nextSunday), repeat: { kind: 'weekly', weekday: 0 } },
-    ],
-    ['Weekly food shop', 60, AREA.focus, { projectId: 'proj-housekeeping' }],
-    ['Clean flat', 60, AREA.focus, { projectId: 'proj-housekeeping' }],
-    ['Admin/post', 30, AREA.focus, { projectId: 'proj-housekeeping' }],
+    // Coding: Jeeves Iteration 2, then Trellis
+    jeeves('M7 Hierarchy', 240, 1),
+    jeeves('M8 Capture', 180, 2),
+    jeeves('M9 Project workflow + AI', 240, 3),
+    jeeves('M10 Editable blocks', 240, 4),
+    jeeves('M11 Contribution view', 180, 5),
+    jeeves('Two-week self-test', 60, 6),
+    ['Scope Trellis MVP', 120, 'proj-trellis', { order: 1 }],
+    // Course: one unit at a time
+    cfa('Ethics and professional standards', 90, 1),
+    cfa('Quantitative methods', 90, 2),
+    cfa('Economics', 90, 3),
+    cfa('Financial statement analysis', 90, 4),
+    // Job: applications (open path), then the setup project
+    ...Array.from({ length: 5 }, (_, i): Row => [`Application #${i + 1}`, 40, 'goal-job']),
+    job('Update CV', 120, 1),
+    job('Refresh LinkedIn', 60, 2),
+    job('Build target list of firms', 120, 3),
+    job('Set up application tracker', 30, 4),
+    job('Recruiter outreach – first 10', 60, 5),
+    // Housekeeping: its own tasks (any area), then the motorbike sale
+    ['Do laundry', 45, HOUSEKEEPING_ID, { due: due(1), repeat: { kind: 'every', days: 8 } }],
+    ['Plan meals for the week', 30, HOUSEKEEPING_ID, { due: due(nextSunday), repeat: { kind: 'weekly', weekday: 0 } }],
+    ['Weekly food shop', 60, HOUSEKEEPING_ID],
+    ['Clean flat', 60, HOUSEKEEPING_ID],
+    ['Admin/post', 30, HOUSEKEEPING_ID],
+    bike('Clean and photograph the bike', 60, 1),
+    bike('Check prices and set an asking price', 30, 2),
+    bike('List it online', 30, 3),
+    bike('Arrange viewings and sell', 60, 4),
   ]
 
-  const tasks: Task[] = rows.map(([title, estimate, areaId, extra], i) => ({
+  const tasks: Task[] = rows.map(([title, estimate, home, extra], i) => ({
     id: `task-${String(i + 1).padStart(2, '0')}`,
     title,
     estimate,
-    areaId,
+    areaId: AREA.focus,
+    goalId: goalOf.get(home) ?? home,
+    ...(goalOf.has(home) && { projectId: home }),
     status: 'backlog',
     rollovers: 0,
     delegable: false,

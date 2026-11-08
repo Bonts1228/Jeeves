@@ -27,13 +27,21 @@ describe('fillBrief', () => {
     const brief = await fillBrief(THU, { now: wed, db })
     expect(brief.placements.map((p) => [p.task.title, p.blockId.split('@')[0], p.reason])).toEqual([
       ['Do laundry', 'tpl-4-1', 'Due Thu · every 8 days'],
-      ['M2 Backlog + capture (1/2)', 'tpl-4-1', 'Launch Jeeves: next step'],
-      ['Update CV', 'tpl-4-2', 'Job search setup: next step'],
-      ['Scope Trellis MVP', 'tpl-4-3', 'Launch Trellis: next step'],
-      ['Application #1', 'tpl-4-2', expect.stringMatching(/^Waiting since /)],
+      // CFA L1 is 5 a week: 3 by the end of Thu, in the units' suggested order
+      ['Ethics and professional standards', 'tpl-4-1', '5 left this week'],
+      ['Quantitative methods', 'tpl-4-1', '5 left this week'],
+      ['Economics', 'tpl-4-2', '5 left this week'],
+      ['Update CV', 'tpl-4-3', 'Job search setup: next step'],
+      ['Clean and photograph the bike', 'tpl-4-2', 'Sell motorbike: next step'],
+      ['Set up application tracker', 'tpl-4-2', 'Job search setup: step 4'], // the only one that still fits
     ])
-    expect([brief.used, brief.cap]).toEqual([505, 540])
-    expect(await scheduled()).toHaveLength(5)
+    // M7 (4h) and Scope Trellis (2h) are next steps that don't fit under capacity
+    expect(brief.notPlaced.map((n) => [n.task.title, n.why])).toEqual([
+      ['M7 Hierarchy', 'Over 9h capacity'],
+      ['Scope Trellis MVP', 'Over 9h capacity'],
+    ])
+    expect([brief.used, brief.cap]).toEqual([525, 540])
+    expect(await scheduled()).toHaveLength(7)
   })
 
   it("leaves today's tasks in a block still running alone, and carries ones from ended blocks", async () => {
@@ -84,16 +92,19 @@ describe('fillBrief', () => {
     expect(await db.tasks.get(laundry)).toMatchObject({ status: 'scheduled', date: THU, reason: 'Added by you' })
     expect((await briefState(THU, db))?.removed).toEqual([])
     // A block without room: nothing written
-    expect(await addToBrief(THU, 'task-34', { blockId: `tpl-4-3@${THU}` }, { now: wed, db })).toBe(false)
-    expect((await db.tasks.get('task-34'))?.status).toBe('backlog')
+    expect(await addToBrief(THU, 'task-07', { blockId: `tpl-4-3@${THU}` }, { now: wed, db })).toBe(false)
+    expect((await db.tasks.get('task-07'))?.status).toBe('backlog')
     // New one-off block
-    expect(await addToBrief(THU, 'task-34', { newBlock: { start: '17:00', end: '19:00', areaId: 'area-focus' } }, { now: wed, db })).toBe(true)
+    expect(await addToBrief(THU, 'task-07', { newBlock: { start: '17:00', end: '19:00', areaId: 'area-focus' } }, { now: wed, db })).toBe(true)
   })
 
   it('reads without writing, and records confirmation', async () => {
-    await fillBrief(THU, { now: wed, db })
+    const filled = await fillBrief(THU, { now: wed, db })
+    const before = await scheduled()
     const { placements, notPlaced } = await readBrief(THU, { now: wed, db })
-    expect([placements, notPlaced]).toEqual([[], []])
+    expect(placements).toEqual([]) // all already placed
+    expect(notPlaced.map((n) => n.task.id)).toEqual(filled.notPlaced.map((n) => n.task.id)) // still don't fit
+    expect(await scheduled()).toEqual(before)
     await confirmBrief(THU, { now: wed, db })
     expect(await briefState(THU, db)).toMatchObject({ confirmedAt: wed.toISOString() })
   })

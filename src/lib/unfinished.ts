@@ -83,7 +83,7 @@ export function overdueTasks(tasks: Task[], today: ISODate): Task[] {
 
 export interface NextBlockInput {
   task: Task
-  anyArea: boolean // manual-only (Housekeeping): any area's block will do
+  anyArea: boolean // Housekeeping's own or manual-only: any area's block will do
   now: Date
   today: Block[] // today's blocks
   tomorrow: Block[] // tomorrow's blocks

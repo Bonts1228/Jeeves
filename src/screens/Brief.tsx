@@ -9,6 +9,7 @@ import { input, primaryBtn, secondaryBtn } from '../components/ui'
 import { ensureBlocks } from '../db/blocks'
 import { addToBrief, briefState, confirmBrief, fillBrief, readBrief, removeFromBrief } from '../db/brief'
 import { db } from '../db/db'
+import { isAnyAreaTask } from '../lib/brief'
 import { addDays, isoDate, parseISODate } from '../lib/dates'
 import { type ScheduleDraft, taskFacts } from '../lib/task-fields'
 import { blockMinutes, formatDuration, toMinutes } from '../lib/time'
@@ -214,7 +215,7 @@ function AddSheet({
   )
   if (!projects || !open) return null
 
-  const anyArea = !!projects.find((p) => p.id === task?.projectId)?.manualOnly
+  const anyArea = !!task && isAnyAreaTask(task, projects)
   const q = query.trim().toLowerCase()
 
   const add = async () => {

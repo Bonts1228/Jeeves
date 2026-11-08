@@ -185,17 +185,15 @@ function AreaRow({ area }: { area: Area }) {
   }
 
   const remove = async () => {
-    const [templates, tasks, goals, projects] = await Promise.all([
+    const [templates, tasks, goals] = await Promise.all([
       db.blockTemplates.where('areaId').equals(area.id).count(),
       db.tasks.where('areaId').equals(area.id).count(),
       db.goals.where('areaId').equals(area.id).count(),
-      db.projects.where('areaId').equals(area.id).count(),
     ])
     const uses = [
       [templates, 'block'],
       [tasks, 'task'],
       [goals, 'goal'],
-      [projects, 'project'],
     ]
       .filter(([n]) => n)
       .map(([n, label]) => `${n} ${label}${n === 1 ? '' : 's'}`)
@@ -511,12 +509,12 @@ function ImportConfirm({
   onCancel: () => void
   onReplace: () => void
 }) {
-  const { exportedAt, tasks, goals, projects, inbox, fromVersion } = summary
+  const { exportedAt, tasks, goals, projects, fromVersion } = summary
   return (
     <div className="space-y-3 rounded-xl bg-red-50 p-3 text-red-900">
       <p className="text-sm">
         File from <span className="font-medium">{when(exportedAt)}</span>: {plural(tasks, 'task')}, {plural(goals, 'goal')},{' '}
-        {plural(projects, 'project')}, {plural(inbox, 'inbox item')}.
+        {plural(projects, 'project')}.
         {fromVersion < SCHEMA_VERSION && ' Made by an older version; it will be upgraded.'}
       </p>
       <p className="font-medium">This replaces everything on this device.</p>

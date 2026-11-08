@@ -8,7 +8,6 @@ import { setupPwaUpdates } from './lib/pwa-update'
 import { Backlog } from './screens/Backlog'
 import { Brief } from './screens/Brief'
 import { Focus } from './screens/Focus'
-import { Inbox } from './screens/Inbox'
 import { GoalScreen, ProjectScreen } from './screens/ListScreens'
 import { Plan } from './screens/Plan'
 import { Settings } from './screens/Settings'
@@ -19,7 +18,6 @@ const router = createBrowserRouter([
     children: [
       { path: '/', element: <Plan /> },
       { path: '/backlog', element: <Backlog /> },
-      { path: '/inbox', element: <Inbox /> },
     ],
   },
   { path: '/brief', element: <Brief /> },

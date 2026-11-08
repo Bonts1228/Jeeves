@@ -2,6 +2,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { type BlockWithRoom, blocksWithRoom, oneOffProblem } from '../db/blocks'
 import { db } from '../db/db'
+import { isAnyAreaTask } from '../lib/brief'
 import { addDays, nextWeekday, weekdayOf } from '../lib/dates'
 import {
   capitalise,
@@ -14,7 +15,7 @@ import {
   type ScheduleDraft,
 } from '../lib/task-fields'
 import { formatDuration, fromMinutes, minutesOfDay, toMinutes, WEEKDAY_SHORT, WEEKDAYS_MON_FIRST } from '../lib/time'
-import type { Area, Block, Goal, ID, ISODate, Project, Repeat, Task } from '../types'
+import { type Area, type Block, type Goal, HOUSEKEEPING_ID, type ID, type ISODate, type Project, type Repeat, type Task } from '../types'
 import { input } from './ui'
 
 // The task chips shared by Capture and task edit: estimate, area, goal/project, due, repeat, schedule.
@@ -22,7 +23,7 @@ import { input } from './ui'
 const ESTIMATES = [15, 30, 45, 60, 90, 120]
 type ChipName = 'estimate' | 'area' | 'link' | 'due' | 'repeat' | 'schedule'
 
-// Scheduling is offered for manual-only project tasks (any area) and already-scheduled tasks (own area),
+// Scheduling is offered for any-area tasks (Housekeeping's own, manual-only) and already-scheduled tasks (own area),
 // unless noSchedule (the placement is already fixed, e.g. quick add into a block).
 export function TaskFields({
   fields,
@@ -43,7 +44,7 @@ export function TaskFields({
   const { areas, goals, projects } = refs
   const { estimate, areaId, link, due, repeat, schedule } = fields
   const r = resolve(fields, refs)
-  const anyArea = !!r.project?.manualOnly
+  const anyArea = !!r.goal && isAnyAreaTask({ goalId: r.goal.id, projectId: r.project?.id }, projects)
   const canSchedule = !noSchedule && (anyArea || task?.status === 'scheduled')
   const scheduleIncomplete = !!schedule && !schedule.placement
 
@@ -51,8 +52,9 @@ export function TaskFields({
   const toggle = (chip: ChipName) => setOpen((o) => (o === chip ? null : chip))
 
   const changeLink = (next: Link) => {
-    const p = next && 'projectId' in next ? projects.find((x) => x.id === next.projectId) : undefined
-    set({ link: next, ...(!p?.manualOnly && task?.status !== 'scheduled' && { schedule: null }) })
+    const r = resolve({ ...fields, link: next }, refs)
+    const anyArea = !!r.goal && isAnyAreaTask({ goalId: r.goal.id, projectId: r.project?.id }, projects)
+    set({ link: next, ...(!anyArea && task?.status !== 'scheduled' && { schedule: null }) })
   }
 
   // Repeats need a due date: default to the first occurrence
@@ -71,7 +73,7 @@ export function TaskFields({
           {areas.find((a) => a.id === r.areaId)?.name ?? 'Area'}
         </Chip>
         <Chip name="link" open={open} set={link !== null} onToggle={toggle}>
-          {r.project?.title ?? r.goal?.title ?? 'Goal / project'}
+          {r.project?.title ?? r.goal?.title ?? 'Housekeeping'}
         </Chip>
         <Chip name="due" open={open} set={!!due} onToggle={toggle}>
           {due ? `Due ${dayLabel(due, today)}` : 'Due'}
@@ -205,7 +207,9 @@ function LinkPicker({
   link: Link
   onChange: (link: Link) => void
 }) {
-  const value = !link ? '' : 'goalId' in link ? `goal:${link.goalId}` : `project:${link.projectId}`
+  const value = !link ? `goal:${HOUSEKEEPING_ID}` : 'goalId' in link ? `goal:${link.goalId}` : `project:${link.projectId}`
+  // Each goal, then its projects; Housekeeping last
+  const ordered = [...goals].sort((a, b) => +!!a.isHousekeeping - +!!b.isHousekeeping)
   return (
     <label className="flex flex-col gap-1 rounded-xl bg-stone-100 p-2">
       <span className="text-sm font-medium text-stone-600">Goal or project</span>
@@ -214,24 +218,21 @@ function LinkPicker({
         value={value}
         onChange={(e) => {
           const [kind, id] = e.target.value.split(':')
-          onChange(!id ? null : kind === 'goal' ? { goalId: id } : { projectId: id })
+          onChange(kind === 'goal' ? { goalId: id } : { projectId: id })
         }}
       >
-        <option value="">None</option>
-        <optgroup label="Goals">
-          {goals.map((g) => (
-            <option key={g.id} value={`goal:${g.id}`}>
-              {g.title}
-            </option>
-          ))}
-        </optgroup>
-        <optgroup label="Projects">
-          {projects.map((p) => (
-            <option key={p.id} value={`project:${p.id}`}>
-              {p.title}
-            </option>
-          ))}
-        </optgroup>
+        {ordered.map((g) => (
+          <optgroup key={g.id} label={g.title}>
+            <option value={`goal:${g.id}`}>{g.title}</option>
+            {projects
+              .filter((p) => p.goalId === g.id)
+              .map((p) => (
+                <option key={p.id} value={`project:${p.id}`}>
+                  {p.title}
+                </option>
+              ))}
+          </optgroup>
+        ))}
       </select>
     </label>
   )

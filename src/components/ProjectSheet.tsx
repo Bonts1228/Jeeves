@@ -3,32 +3,33 @@ import { useState } from 'react'
 import { db, newId } from '../db/db'
 import { saveProject } from '../db/goals'
 import { hasOpenSteps, waitCandidates } from '../lib/holdback'
-import type { Project } from '../types'
+import { HOUSEKEEPING_ID, type ID, type Project } from '../types'
 import { DeleteListConfirm } from './DeleteListConfirm'
 import { Field } from './GoalSheet'
 import { Sheet } from './Sheet'
 import { dangerBtn, input, primaryBtn, secondaryBtn } from './ui'
 
+// goalId: the goal a new project goes under (from that goal's screen), else Housekeeping.
 export function ProjectSheet({
   project,
+  goalId = HOUSEKEEPING_ID,
   onClose,
   onDeleted,
 }: {
   project?: Project
+  goalId?: ID
   onClose: () => void
   onDeleted?: () => void
 }) {
-  const areas = useLiveQuery(() => db.areas.toArray())
   const goals = useLiveQuery(() => db.goals.toArray())
   const projects = useLiveQuery(() => db.projects.toArray())
   const openTasks = useLiveQuery(() => db.tasks.where('status').anyOf('backlog', 'scheduled').toArray())
-  const [draft, setDraft] = useState<Omit<Project, 'id'>>(() => project ?? { title: '', areaId: '' })
+  const [draft, setDraft] = useState<Omit<Project, 'id'>>(() => project ?? { title: '', goalId })
   const [deleting, setDeleting] = useState(false)
-  if (!areas || !goals || !projects || !openTasks) return null
+  if (!goals || !projects || !openTasks) return null
 
   const set = (patch: Partial<Project>) => setDraft((d) => ({ ...d, ...patch }))
-  const areaId = draft.areaId || areas[0]?.id
-  const valid = !!draft.title.trim() && !!areaId
+  const valid = !!draft.title.trim() && goals.some((g) => g.id === draft.goalId)
   const toggledManual = project && !!project.manualOnly !== !!draft.manualOnly
 
   const save = async () => {
@@ -36,8 +37,7 @@ export function ProjectSheet({
     await saveProject({
       id: project?.id ?? newId(),
       title: draft.title.trim(),
-      areaId: areaId!,
-      ...(draft.goalId && { goalId: draft.goalId }),
+      goalId: draft.goalId,
       ...(draft.manualOnly && { manualOnly: true }),
       ...(draft.notBefore && { notBefore: draft.notBefore }),
       ...(draft.startsAfterProjectId && { startsAfterProjectId: draft.startsAfterProjectId }),
@@ -66,19 +66,9 @@ export function ProjectSheet({
           <Field label="Title">
             <input className={input} value={draft.title} onChange={(e) => set({ title: e.target.value })} autoComplete="off" />
           </Field>
-          <Field label="Area">
-            <select className={input} value={areaId} onChange={(e) => set({ areaId: e.target.value })}>
-              {areas.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Feeds goal (optional)" hint="Done steps count towards it.">
-            <select className={input} value={draft.goalId ?? ''} onChange={(e) => set({ goalId: e.target.value || undefined })}>
-              <option value="">None</option>
-              {goals.map((g) => (
+          <Field label="Goal" hint="Done steps count towards it. Its area is the goal's.">
+            <select className={input} value={draft.goalId} onChange={(e) => set({ goalId: e.target.value })}>
+              {[...goals].sort((a, b) => +!!a.isHousekeeping - +!!b.isHousekeeping).map((g) => (
                 <option key={g.id} value={g.id}>
                   {g.title}
                 </option>
@@ -95,7 +85,7 @@ export function ProjectSheet({
             <span>
               Only when I add it
               <span className="block text-sm text-stone-500">
-                Never auto-placed unless due or overdue. Steps have no order. For life admin like Housekeeping.
+                Never auto-placed unless due or overdue. Steps have no order.
               </span>
             </span>
           </label>

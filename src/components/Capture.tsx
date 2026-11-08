@@ -4,6 +4,7 @@ import { blockRoom, scheduleNewTask } from '../db/blocks'
 import { db, newId } from '../db/db'
 import { addUrgent, isUrgent, type UrgentResult, undoUrgent } from '../db/replan'
 import { addTask } from '../db/tasks'
+import { isAnyAreaTask } from '../lib/brief'
 import { isoDate } from '../lib/dates'
 import { formatDuration } from '../lib/time'
 import type { Block, ID, Task } from '../types'
@@ -17,13 +18,12 @@ import { input, primaryBtn, secondaryBtn } from './ui'
 export interface CaptureInit {
   text?: string
   link?: Link
-  inboxId?: ID // turning an Inbox item into a task: it's removed in the same transaction as the save
   block?: Block // quick add into this (running) block: area preset, schedule fixed, may go over
 }
 
-// Quick capture. Fastest path: type, then To Inbox (or Enter) — no chips needed.
-// Once any chip is set, Enter adds to the Backlog instead. The sheet stays open for the next task,
-// except when processing an Inbox item, which closes it after the save.
+// Quick capture. Fastest path: type, then Enter — no chips needed: the task goes to the Backlog under
+// Housekeeping (or the goal/project it was opened from) with the default estimate. The sheet stays
+// open for the next task.
 // With init.block, it adds straight into that block (any area), even past its room.
 // Urgent capture: a task due today (no block or schedule picked) goes into today's remaining blocks
 // at once, moving lower-ranked tasks out if it must (db/replan). The result shows here with Undo;
@@ -58,7 +58,6 @@ export function Capture({ init, onClose }: { init?: CaptureInit; onClose: () => 
           task={placing}
           onCancel={() => setPlacing(null)}
           onDone={(date) => {
-            if (fromInbox) return onClose()
             setPlacing(null)
             setUnplaced(null)
             setStatus({ ok: true, text: `Scheduled ${dayLabel(date, today)}: ${placing.title}` })
@@ -67,39 +66,28 @@ export function Capture({ init, onClose }: { init?: CaptureInit; onClose: () => 
       </Sheet>
     )
 
-  const fromInbox = !!init?.inboxId
   const { project, goal, estimate, areaId } = resolve(fields, refs)
-  const { link, due, repeat, schedule } = fields
-  const touched =
-    !!block ||
-    fromInbox || fields.estimate !== null || fields.areaId !== null || (link !== null && !init?.link) || !!due || !!repeat || !!schedule
+  const { due, repeat, schedule } = fields
   const scheduleIncomplete = !!schedule && !schedule.placement
   const title = text.trim()
 
   const saved = (message: string) => {
     setUrgent(null)
     setUnplaced(null)
-    if (fromInbox) return onClose()
     setText('')
     setFields((f) => ({ ...emptyFields(f.link), areaId: f.areaId })) // keep area and goal/project for the next one
     setSaves((n) => n + 1)
     setStatus({ ok: true, text: message })
   }
 
-  const toInbox = async () => {
-    if (!title) return
-    await db.inbox.add({ id: newId(), text: title, createdAt: nowISO() })
-    saved(`To Inbox: ${title}`)
-  }
-
   const addToBacklog = async () => {
-    if (!title || !areaId || scheduleIncomplete) return
+    if (!title || !areaId || !goal || scheduleIncomplete) return
     const task: Task = {
       id: newId(),
       title,
       estimate,
       areaId,
-      ...(goal && { goalId: goal.id }),
+      goalId: goal.id,
       ...(project && { projectId: project.id }),
       ...(due && { due }),
       ...(repeat && { repeat }),
@@ -110,14 +98,14 @@ export function Capture({ init, onClose }: { init?: CaptureInit; onClose: () => 
     }
     if (block) {
       const room = blockRoom(block, inBlock)
-      if (!(await scheduleNewTask(task, block.date, { blockId: block.id }, { inboxId: init?.inboxId, force: true }))) {
+      if (!(await scheduleNewTask(task, block.date, { blockId: block.id }, { force: true }))) {
         setStatus({ ok: false, text: 'This block is gone.' })
         return
       }
       const over = estimate - room
       saved(`Added: ${title}${over > 0 ? ` · ${over} min over` : ''}`)
     } else if (schedule?.placement) {
-      const placed = await scheduleNewTask(task, schedule.date, schedule.placement, { inboxId: init?.inboxId })
+      const placed = await scheduleNewTask(task, schedule.date, schedule.placement)
       if (!placed) {
         setStatus({ ok: false, text: 'That block no longer has room. Pick again.' })
         setFields((f) => ({ ...f, schedule: { date: schedule.date, placement: null } }))
@@ -125,24 +113,17 @@ export function Capture({ init, onClose }: { init?: CaptureInit; onClose: () => 
       }
       saved(`Scheduled ${dayLabel(schedule.date, today)}: ${title}`)
     } else if (isUrgent(task)) {
-      const result = await addUrgent(task, { inboxId: init?.inboxId })
+      const result = await addUrgent(task)
       const area = refs.areas.find((a) => a.id === areaId)?.name ?? ''
       if (!result.placed) {
-        const why = `Not placed: no ${project?.manualOnly ? '' : `${area} `}block left today${
+        const why = `Not placed: no ${isAnyAreaTask(task, refs.projects) ? '' : `${area} `}block left today${
           result.why === 'no-room' ? ` with ${formatDuration(estimate)} free` : ''
         }. In the Backlog, due today.`
-        // From the Inbox the sheet stays open on this, so Pick a block is still there
-        if (fromInbox) setStatus({ ok: true, text: why })
-        else saved(why)
+        saved(why)
         setUnplaced(task)
         return
       }
       const text = await urgentText(title, result)
-      const undo = () => undoUrgent(result.snapshot)
-      if (fromInbox) {
-        showBanner({ label: text, undo }, 'replan')
-        return saved(text)
-      }
       saved(text)
       setStatus(null)
       setUrgent({
@@ -154,20 +135,18 @@ export function Capture({ init, onClose }: { init?: CaptureInit; onClose: () => 
         },
       })
     } else {
-      await addTask(task, { inboxId: init?.inboxId })
-      saved(`To Backlog: ${title}`)
+      await addTask(task)
+      saved(`To ${project?.title ?? goal.title}: ${title}`)
     }
   }
 
   return (
-    <Sheet title={block ? 'Add to this block' : fromInbox ? 'Inbox item → task' : 'Capture'} onClose={close}>
+    <Sheet title={block ? 'Add to this block' : 'Capture'} onClose={close}>
       <form
         className="space-y-3"
         onSubmit={(e) => {
           e.preventDefault()
-          if (fromInbox && unplaced) return // already saved: Pick a block or Close
-          if (touched) addToBacklog()
-          else toInbox()
+          addToBacklog()
         }}
       >
         <label htmlFor="capture-text" className="sr-only">
@@ -209,32 +188,11 @@ export function Capture({ init, onClose }: { init?: CaptureInit; onClose: () => 
           </div>
         )}
 
-        {fromInbox && unplaced ? (
-          <button type="button" className={`${secondaryBtn} w-full`} onClick={close}>
-            Close
+        <div className="pt-1">
+          <button type="submit" className={`${primaryBtn} w-full`} disabled={!title || scheduleIncomplete}>
+            {block ? 'Add to block' : schedule ? 'Schedule' : 'Add to Backlog'}
           </button>
-        ) : (
-          <div className="flex gap-2 pt-1">
-            {!fromInbox && (
-              <button
-                type="button"
-                className={`${touched ? secondaryBtn : primaryBtn} flex-1`}
-                disabled={!title}
-                onClick={toInbox}
-              >
-                To Inbox
-              </button>
-            )}
-            <button
-              type="button"
-              className={`${touched ? primaryBtn : secondaryBtn} flex-1`}
-              disabled={!title || scheduleIncomplete}
-              onClick={addToBacklog}
-            >
-              {block ? 'Add to block' : schedule ? 'Schedule' : 'Add to Backlog'}
-            </button>
-          </div>
-        )}
+        </div>
       </form>
     </Sheet>
   )

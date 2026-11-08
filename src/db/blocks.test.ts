@@ -11,6 +11,7 @@ const fri = (h: number, m = 0) => new Date(2026, 9, 16, h, m)
 
 const task = (extra: Partial<Task> = {}): Task => ({
   id: 'new',
+  goalId: 'g-none', // no such goal row: not Housekeeping, so not manual-only
   title: 'Admin/post',
   estimate: 30,
   areaId: 'area-focus',

@@ -21,8 +21,8 @@ export function useDay(date: ISODate) {
   const projects = useLiveQuery(() => db.projects.toArray())
   const blocks = useLiveQuery(() => db.blocks.where('date').equals(date).toArray(), [date])
   const tasks = useLiveQuery(() => db.tasks.where('date').equals(date).toArray(), [date])
-  // All non-deleted tasks of set paths, for their "n of m steps"
-  const pathTasks = useLiveQuery(() => db.tasks.filter((t) => !!t.goalId && t.status !== 'deleted').toArray())
+  // All non-deleted tasks, for goal and project numbers
+  const pathTasks = useLiveQuery(() => db.tasks.filter((t) => t.status !== 'deleted').toArray())
   const logs = useLiveQuery(() => db.logEntries.toArray())
 
   if (ready !== date || !areas || !goals || !projects || !blocks || !tasks || !pathTasks || !logs) return undefined

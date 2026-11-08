@@ -3,7 +3,7 @@ import { BottomBar } from './BottomBar'
 import { DoneBanner } from './DoneBanner'
 import { GearIcon } from './icons'
 
-const TITLES: Record<string, string> = { '/': 'Plan', '/backlog': 'Backlog', '/inbox': 'Inbox' }
+const TITLES: Record<string, string> = { '/': 'Plan', '/backlog': 'Backlog' }
 
 // Main screens: header with Settings link, content, bottom bar, and the app's Done/Undo banner.
 export function Layout() {

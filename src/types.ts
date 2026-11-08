@@ -35,7 +35,10 @@ export interface Block {
   protected: boolean
 }
 
-export type GoalType = 'set_path' | 'open_path' | 'recurring'
+export type GoalType = 'open_path' | 'recurring'
+
+// The one system goal: every task without a core goal lives here. No target.
+export const HOUSEKEEPING_ID = 'goal-housekeeping'
 
 export interface Goal {
   id: ID
@@ -47,14 +50,14 @@ export interface Goal {
   deadline?: ISODate
   servedByBlocks?: boolean // recurring only: every block in areaId counts as one; else a count of ticked tasks
   detailFields?: string[] // e.g. ['role', 'company']
+  isHousekeeping?: boolean // the system goal: no target, can't be deleted; its own tasks may use any area's block
 }
 
 export interface Project {
   id: ID
   title: string
-  areaId: ID
-  goalId?: ID // done steps log against this goal
-  manualOnly?: boolean // e.g. Housekeeping: never auto-placed unless due or overdue
+  goalId: ID // a core goal, or Housekeeping; its tasks carry the same goalId
+  manualOnly?: boolean // never auto-placed unless due or overdue
   notBefore?: ISODate // held back until this date
   startsAfterProjectId?: ID // held back until that project's steps are all done or deleted; then cleared
 }
@@ -70,9 +73,9 @@ export interface Task {
   title: string
   estimate: Minutes
   areaId: ID
-  goalId?: ID
+  goalId: ID // every task has a home: its project's goal, else Housekeeping if nothing else
   projectId?: ID
-  order?: number // step position in a set path or project
+  order?: number // suggested step position in a project: a soft preference, never a gate
   due?: ISODate
   repeat?: Repeat // requires due; done creates the next occurrence
   prevId?: ID // the occurrence this one follows; at most one task per prevId
@@ -92,10 +95,4 @@ export interface LogEntry {
   blockId?: ID // a ticked block of a servedByBlocks goal
   completedAt: string
   details?: Record<string, string>
-}
-
-export interface InboxItem {
-  id: ID
-  text: string
-  createdAt: string
 }

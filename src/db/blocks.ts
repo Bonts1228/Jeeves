@@ -2,7 +2,7 @@ import { isoDate, weekdayOf } from '../lib/dates'
 import { minutesOfDay, overlaps, toMinutes } from '../lib/time'
 import type { Block, ID, ISODate, Minutes, Task } from '../types'
 import { type BriefDB, db as defaultDb, newId } from './db'
-import { renumber, stepListOf } from './steps'
+import { homeOf, renumber, stepListOf } from './steps'
 
 // Meta key marking a date whose blocks were made, so a day edited down to no template blocks stays as
 // edited. Device-only; import clears these (the "any template block" check covers imported days).
@@ -139,22 +139,21 @@ export async function resolvePlacement(
 
 // Schedule a new task on a date, either into a block with room or into a new one-off block.
 // If the block no longer has room, nothing is written and this returns false.
-// inboxId: the Inbox item this task came from, removed in the same transaction.
 // force: into the given block even if it goes over (quick add into a running block).
 export async function scheduleNewTask(
   task: Task,
   date: ISODate,
   placement: Placement,
-  { now = new Date(), db = defaultDb, inboxId, force }: { now?: Date; db?: BriefDB; inboxId?: ID; force?: boolean } = {},
+  { now = new Date(), db = defaultDb, force }: { now?: Date; db?: BriefDB; force?: boolean } = {},
 ): Promise<boolean> {
   await ensureBlocks(date, db)
-  return db.transaction('rw', [db.tasks, db.blocks, db.inbox, db.goals, db.projects], async () => {
+  return db.transaction('rw', [db.tasks, db.blocks, db.goals, db.projects], async () => {
     const blockId = await resolvePlacement(db, { date, placement }, task.estimate, now, undefined, force)
     if (!blockId) return false
     const { order: _, ...unordered } = task // renumber decides the order
-    await db.tasks.add({ ...unordered, status: 'scheduled', date, blockId, reason: 'Added by you' })
-    await renumber(db, stepListOf(task))
-    if (inboxId) await db.inbox.delete(inboxId)
+    const goalId = await homeOf(db, task)
+    await db.tasks.add({ ...unordered, goalId, status: 'scheduled', date, blockId, reason: 'Added by you' })
+    await renumber(db, stepListOf({ ...task, goalId }))
     return true
   })
 }

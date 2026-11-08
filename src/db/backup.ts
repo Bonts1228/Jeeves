@@ -1,5 +1,5 @@
 import { findWaitLoop } from '../lib/holdback'
-import type { Settings } from '../types'
+import { HOUSEKEEPING_ID, type Settings } from '../types'
 import { type BriefDB, db as defaultDb, LAST_EXPORT_KEY, SETTINGS_KEY } from './db'
 import { BLOCKS_MADE_PREFIX } from './blocks'
 import { migrateTables, SCHEMA_VERSION } from './migrations'
@@ -18,9 +18,11 @@ export const DATA_TABLES = [
   'projects',
   'tasks',
   'logEntries',
-  'inbox',
 ] as const
 type DataTable = (typeof DATA_TABLES)[number]
+// Tables only older files carry: read and migrated away on import (v5 turned the Inbox into tasks).
+const OLD_TABLES = { inbox: 5 } as const
+type FileTable = DataTable | keyof typeof OLD_TABLES
 type Row = Record<string, unknown>
 
 export interface ExportFile {
@@ -54,7 +56,8 @@ export async function lastExport(db: BriefDB = defaultDb): Promise<string | unde
 
 // What a row of each table must have. Optional fields aren't checked.
 type Check = 'string' | 'number' | 'boolean' | 'weekday' | readonly string[]
-const REQUIRED: Record<DataTable, { label: string; fields: Record<string, Check> }> = {
+// Checked before migrating, so they're what every version shares; goal links are checked after (checkHomes).
+const REQUIRED: Record<FileTable, { label: string; fields: Record<string, Check> }> = {
   areas: { label: 'Area', fields: { id: 'string', name: 'string' } },
   blockTemplates: {
     label: 'Block template',
@@ -68,7 +71,7 @@ const REQUIRED: Record<DataTable, { label: string; fields: Record<string, Check>
     label: 'Goal',
     fields: { id: 'string', title: 'string', areaId: 'string', type: ['set_path', 'open_path', 'recurring'] },
   },
-  projects: { label: 'Project', fields: { id: 'string', title: 'string', areaId: 'string' } },
+  projects: { label: 'Project', fields: { id: 'string', title: 'string' } },
   tasks: {
     label: 'Task',
     fields: {
@@ -84,6 +87,21 @@ const REQUIRED: Record<DataTable, { label: string; fields: Record<string, Check>
   },
   logEntries: { label: 'Log entry', fields: { id: 'string', completedAt: 'string' } },
   inbox: { label: 'Inbox item', fields: { id: 'string', text: 'string', createdAt: 'string' } },
+}
+
+// v5: every task and project belongs to a goal in the file, and the Housekeeping goal is there.
+function checkHomes(tables: Record<DataTable, Row[]>): string | null {
+  const goals = new Set(tables.goals.map((g) => g.id))
+  if (tables.goals.some((g) => g.type === 'set_path')) return 'A goal still has the old set-path type.'
+  if (!tables.goals.some((g) => g.id === HOUSEKEEPING_ID && g.isHousekeeping === true)) return 'The file has no Housekeeping goal.'
+  const project = tables.projects.find((p) => !goals.has(p.goalId))
+  if (project) return `Project “${project.title}” belongs to a goal that isn't in the file.`
+  const projectGoal = new Map(tables.projects.map((p) => [p.id, p.goalId]))
+  const task = tables.tasks.find(
+    (t) => !goals.has(t.goalId) || (t.projectId !== undefined && projectGoal.get(t.projectId) !== t.goalId),
+  )
+  if (task) return `Task “${task.title}” belongs to a goal or project that isn't in the file.`
+  return null
 }
 
 function fits(value: unknown, check: Check) {
@@ -124,7 +142,6 @@ export interface ImportSummary {
   tasks: number // not deleted
   goals: number
   projects: number
-  inbox: number
 }
 
 export type ParsedImport = { ok: true; file: ExportFile; summary: ImportSummary } | { ok: false; reason: string }
@@ -157,9 +174,10 @@ export function parseImport(text: string): ParsedImport {
     return fail('Settings are missing or incomplete.')
 
   if (!isObject(raw.tables)) return fail('The file has no tables.')
-  const tables = {} as Record<DataTable, Row[]>
-  for (const name of DATA_TABLES) {
-    const rows = raw.tables[name]
+  const tables = {} as Record<FileTable, Row[]>
+  const old = Object.entries(OLD_TABLES).flatMap(([name, gone]) => ((version as number) < gone ? [name as FileTable] : []))
+  for (const name of [...DATA_TABLES, ...old]) {
+    const rows = raw.tables[name] ?? (name in OLD_TABLES ? [] : undefined) // an old table may be absent: nothing to migrate
     if (!Array.isArray(rows)) return fail(`The ${name} table is missing.`)
     const { label, fields } = REQUIRED[name]
     const seen = new Set<unknown>()
@@ -178,6 +196,8 @@ export function parseImport(text: string): ParsedImport {
   if (problem) return fail(problem)
 
   migrateTables(tables, version as number)
+  const homes = checkHomes(tables)
+  if (homes) return fail(homes)
   const file: ExportFile = {
     app: APP,
     schemaVersion: SCHEMA_VERSION,
@@ -194,7 +214,6 @@ export function parseImport(text: string): ParsedImport {
       tasks: tables.tasks.filter((t) => t.status !== 'deleted').length,
       goals: tables.goals.length,
       projects: tables.projects.length,
-      inbox: tables.inbox.length,
     },
   }
 }

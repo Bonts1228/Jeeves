@@ -1,3 +1,4 @@
+import { isAnyAreaTask } from '../lib/brief'
 import { addDays, isoDate } from '../lib/dates'
 import { movedId, nextBlockFor, nextSessionFor, skippedId } from '../lib/unfinished'
 import type { Block, ID, ISODate, Task } from '../types'
@@ -40,13 +41,12 @@ export async function readNextBlocks(
     db.tasks.where('date').anyOf(today, tomorrow).filter((t) => t.status === 'scheduled').toArray(),
     db.projects.toArray(),
   ])
-  const manual = new Set(projects.filter((p) => p.manualOnly).map((p) => p.id))
   return new Map(
     tasks.map((task) => [
       task.id,
       nextBlockFor({
         task,
-        anyArea: !!task.projectId && manual.has(task.projectId),
+        anyArea: isAnyAreaTask(task, projects),
         now,
         today: todayBlocks,
         tomorrow: tomorrowBlocks,

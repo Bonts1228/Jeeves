@@ -5,16 +5,15 @@ import type { Goal, ID, Repeat, Task } from '../types'
 import { ensureBlocks, resolvePlacement, type Schedule } from './blocks'
 import { type BriefDB, db as defaultDb, newId } from './db'
 import { releaseWaiting } from './goals'
-import { renumber, sameList, stepListOf } from './steps'
+import { homeOf, renumber, sameList, stepListOf } from './steps'
 
-// Add a new Backlog task (a new step goes last). inboxId: the Inbox item it came from, removed in
-// the same transaction.
-export async function addTask(task: Task, { db = defaultDb, inboxId }: { db?: BriefDB; inboxId?: ID } = {}) {
-  await db.transaction('rw', [db.tasks, db.inbox, db.goals, db.projects], async () => {
+// Add a new Backlog task (a new step goes last), under its project's goal, else Housekeeping.
+export async function addTask(task: Task, { db = defaultDb }: { db?: BriefDB } = {}) {
+  await db.transaction('rw', [db.tasks, db.goals, db.projects], async () => {
     const { order: _, ...unordered } = task // renumber decides the order
-    await db.tasks.add(unordered)
-    await renumber(db, stepListOf(task))
-    if (inboxId) await db.inbox.delete(inboxId)
+    const homed = { ...unordered, goalId: await homeOf(db, task) }
+    await db.tasks.add(homed)
+    await renumber(db, stepListOf(homed))
   })
 }
 
@@ -25,7 +24,8 @@ export type TaskPatch = Partial<Pick<Task, 'title' | 'estimate' | 'areaId' | 'go
 // A bigger estimate or a new block goes through the same room check as new tasks: if it no longer
 // fits, nothing is written and this returns 'no-room'. Done and deleted tasks aren't edited ('closed').
 // A changed repeat rule also applies to later open occurrences; done ones are never touched.
-// Moving to another goal/project puts the task last there and closes the gap it left.
+// Moving to another goal/project puts the task last there and closes the gap it left. A task in a
+// project takes the project's goal; with neither goal nor project it goes to Housekeeping.
 export async function updateTask(
   id: ID,
   patch: TaskPatch,
@@ -43,8 +43,9 @@ export async function updateTask(
     const task = await db.tasks.get(id)
     if (!task || (task.status !== 'backlog' && task.status !== 'scheduled')) return 'closed'
     const changes: Partial<Task> = { ...patch }
+    if ('projectId' in patch || 'goalId' in patch) changes.goalId = await homeOf(db, { ...task, ...patch })
     const fromList = stepListOf(task)
-    const toList = stepListOf({ ...task, ...patch })
+    const toList = stepListOf({ ...task, ...changes })
     const moved = !sameList(fromList, toList)
     if (moved) changes.order = undefined
 
@@ -84,9 +85,8 @@ const sameRepeat = (a?: Repeat, b?: Repeat) => JSON.stringify(a) === JSON.string
 // What ticking a task logs against: the goal id (kept even if that goal row is gone) and the goal,
 // unless a served-by-blocks block covers it (lib/progress loggedGoal).
 async function tickTarget(db: BriefDB, task: Task): Promise<{ goalId?: ID; goal?: Goal }> {
-  const project = task.projectId ? await db.projects.get(task.projectId) : undefined
-  const goalId = task.goalId ?? project?.goalId
-  const goal = goalId ? await db.goals.get(goalId) : undefined
+  const goalId = task.goalId
+  const goal = await db.goals.get(goalId)
   const block = task.blockId ? await db.blocks.get(task.blockId) : undefined
   if (goal && !loggedGoal(task, goal, block)) return {}
   return { goalId, goal }
@@ -98,8 +98,7 @@ export async function tickGoal(id: ID, db: BriefDB = defaultDb): Promise<Goal | 
   return task && (await tickTarget(db, task)).goal
 }
 
-// Ticking done is the only completion signal. Writes a LogEntry against the task's goal (or its
-// project's goal) and, for a repeating task, creates the next occurrence. A task has at most one
+// Ticking done is the only completion signal. Writes a LogEntry against the task's goal and, for a repeating task, creates the next occurrence. A task has at most one
 // next occurrence (linked by prevId), so completing twice or complete → undo → complete never duplicates.
 // A goal served by blocks counts its blocks: a task done in one of its area's blocks is covered by
 // the block tick, so its entry doesn't count against the goal. Done anywhere else, it counts.

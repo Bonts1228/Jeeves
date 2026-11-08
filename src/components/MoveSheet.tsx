@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { updateTask } from '../db/tasks'
 import { rollOver } from '../db/unfinished'
+import { isAnyAreaTask } from '../lib/brief'
 import { addDays, isoDate } from '../lib/dates'
 import { type ScheduleDraft, taskFacts, useRefs } from '../lib/task-fields'
 import type { Task } from '../types'
@@ -16,7 +17,7 @@ export function MoveForm({ task, onDone, onCancel }: { task: Task; onDone: () =>
   const [schedule, setSchedule] = useState<ScheduleDraft>({ date: today, placement: null })
   const [error, setError] = useState<string | null>(null)
   if (!refs) return null
-  const anyArea = !!refs.projects.find((p) => p.id === task.projectId)?.manualOnly
+  const anyArea = isAnyAreaTask(task, refs.projects)
 
   const move = async (to: ScheduleDraft | null) => {
     const ok = await rollOver(task.id, to?.placement ? { date: to.date, placement: to.placement } : null)
@@ -78,7 +79,7 @@ export function ScheduleForm({ task, onDone, onCancel }: { task: Task; onDone: (
   const [schedule, setSchedule] = useState<ScheduleDraft>({ date: today, placement: null })
   const [error, setError] = useState<string | null>(null)
   if (!refs) return null
-  const anyArea = !!refs.projects.find((p) => p.id === task.projectId)?.manualOnly
+  const anyArea = isAnyAreaTask(task, refs.projects)
 
   const save = async () => {
     if (!schedule.placement) return

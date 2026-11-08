@@ -4,17 +4,17 @@ import type {
   Block,
   BlockTemplate,
   Goal,
-  InboxItem,
   LogEntry,
   Project,
   Settings,
   Task,
 } from '../types'
-import { goalToV2 } from './migrations'
+import { goalToV2, toV5 } from './migrations'
 
 // Settings is a single row stored under this out-of-line key.
 export const SETTINGS_KEY = 'settings'
 export const LAST_EXPORT_KEY = 'lastExportAt'
+export const SEED_KEY = 'seedVersion' // the seed the data started from (db/seed.ts)
 
 export class BriefDB extends Dexie {
   settings!: Table<Settings, string>
@@ -25,8 +25,7 @@ export class BriefDB extends Dexie {
   projects!: EntityTable<Project, 'id'>
   tasks!: EntityTable<Task, 'id'>
   logEntries!: EntityTable<LogEntry, 'id'>
-  inbox!: EntityTable<InboxItem, 'id'>
-  meta!: Table<string, string> // about this device, never exported: 'lastExportAt'
+  meta!: Table<string, string> // about this device, never exported: 'lastExportAt', 'seedVersion'
 
   constructor(name = 'daily-brief') {
     super(name)
@@ -53,6 +52,19 @@ export class BriefDB extends Dexie {
     // v4: project hold-back. New fields are optional, so rows need no upgrade; the index finds the
     // projects waiting on one.
     this.version(4).stores({ projects: 'id, areaId, startsAfterProjectId' })
+    // v5 (M7): Goal → Project → Task with a Housekeeping goal; the Inbox becomes Housekeeping tasks.
+    // The inbox table is dropped after this upgrade runs, so its rows can still be read here.
+    this.version(5)
+      .stores({ projects: 'id, goalId, startsAfterProjectId', inbox: null })
+      .upgrade(async (tx) => {
+        const read = (name: string) => tx.table(name).toArray()
+        const tables = { areas: await read('areas'), goals: await read('goals'), projects: await read('projects'), tasks: await read('tasks') }
+        toV5(tables, await read('inbox'))
+        for (const name of ['goals', 'projects', 'tasks'] as const) {
+          await tx.table(name).clear()
+          await tx.table(name).bulkAdd(tables[name])
+        }
+      })
   }
 }
 

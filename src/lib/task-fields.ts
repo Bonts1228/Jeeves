@@ -1,7 +1,7 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../db/db'
 import type { Placement } from '../db/blocks'
-import type { Area, Goal, ID, ISODate, Project, Repeat, Task } from '../types'
+import { type Area, type Goal, HOUSEKEEPING_ID, type ID, type ISODate, type Project, type Repeat, type Task } from '../types'
 import { addDays, parseISODate } from './dates'
 import { formatDuration, WEEKDAY_SHORT } from './time'
 
@@ -9,6 +9,7 @@ import { formatDuration, WEEKDAY_SHORT } from './time'
 
 export const DEFAULT_ESTIMATE = 30
 
+// Where a task goes. null = not chosen: Housekeeping.
 export type Link = { goalId: ID } | { projectId: ID } | null
 
 export interface ScheduleDraft {
@@ -41,16 +42,18 @@ export function useRefs(): Refs | undefined {
   return areas && goals && projects ? { areas, goals, projects } : undefined
 }
 
-// Fields with defaults applied: estimate 30m; area from the linked goal/project, else the first area.
+// Fields with defaults applied: estimate 30m; goal from the project, else the linked goal, else
+// Housekeeping; area from the goal, else the first area.
 export function resolve(fields: Fields, refs: Refs) {
   const { link } = fields
   const project = link && 'projectId' in link ? refs.projects.find((p) => p.id === link.projectId) : undefined
-  const goal = link && 'goalId' in link ? refs.goals.find((g) => g.id === link.goalId) : undefined
+  const goalId = project?.goalId ?? (link && 'goalId' in link ? link.goalId : HOUSEKEEPING_ID)
+  const goal = refs.goals.find((g) => g.id === goalId)
   return {
     project,
     goal,
     estimate: fields.estimate ?? DEFAULT_ESTIMATE,
-    areaId: fields.areaId ?? project?.areaId ?? goal?.areaId ?? refs.areas[0]?.id,
+    areaId: fields.areaId ?? goal?.areaId ?? refs.areas[0]?.id,
   }
 }
 

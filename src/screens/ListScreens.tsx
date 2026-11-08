@@ -14,27 +14,26 @@ import { db } from '../db/db'
 import { updateDetails } from '../db/goals'
 import { moveStep, type StepList, stepsOf } from '../db/steps'
 import { isoDate } from '../lib/dates'
-import { detailFieldsOf, detailsText, goalProgress } from '../lib/progress'
+import { heldBackLabel, isHeldBack } from '../lib/holdback'
+import { detailFieldsOf, detailsText, goalProgress, nextStep, projectNumber } from '../lib/progress'
 import { capitalise, dayLabel, taskFacts } from '../lib/task-fields'
 import type { Goal, LogEntry, Task } from '../types'
 
-const GOAL_TYPE = { set_path: 'Set path', open_path: 'Open path', recurring: 'Recurring' }
+const GOAL_TYPE = { open_path: 'Open path', recurring: 'Recurring' }
 
 export function GoalScreen() {
   const { id = '' } = useParams()
   const navigate = useNavigate()
   const goal = useLiveQuery(() => db.goals.get(id), [id])
   const logs = useLiveQuery(() => db.logEntries.where('goalId').equals(id).toArray(), [id])
-  const feeders = useLiveQuery(() => db.projects.filter((p) => p.goalId === id).toArray(), [id])
   const area = useLiveQuery(async () => (goal ? db.areas.get(goal.areaId) : undefined), [goal?.areaId])
   const [editing, setEditing] = useState(false)
   const [today] = useState(() => isoDate(new Date()))
-  if (goal === undefined || !logs || !feeders) return <Page title="" onEdit={() => {}} />
+  if (goal === undefined || !logs) return <Page title="" onEdit={() => {}} />
 
   const progress = goalProgress(goal, logs)
-  const ordered = goal.type === 'set_path'
   const facts = [
-    GOAL_TYPE[goal.type],
+    goal.isHousekeeping ? 'Everything without a core goal' : GOAL_TYPE[goal.type],
     progress && `${progress.done} of ${progress.target} this ${goal.period}`,
     goal.servedByBlocks && `Every ${area?.name ?? ''} block counts`,
     goal.deadline && `By ${dayLabel(goal.deadline, today)}`,
@@ -44,29 +43,63 @@ export function GoalScreen() {
   return (
     <Page title={goal.title} onEdit={() => setEditing(true)}>
       <p className="text-sm text-stone-500">{facts.join(' · ')}</p>
-      {feeders.length > 0 && (
-        <p className="text-sm">
-          Fed by{' '}
-          {feeders.map((p, i) => (
-            <span key={p.id}>
-              {i > 0 && ', '}
-              <Link to={`/projects/${p.id}`} className="font-medium underline underline-offset-2">
-                {p.title}
-              </Link>
-            </span>
-          ))}
-        </p>
-      )}
+      <Projects goal={goal} today={today} />
       {goal.servedByBlocks && goal.type === 'recurring' ? (
         <p className="rounded-xl bg-white p-4 text-sm text-stone-600">
           Each {area?.name ?? ''} block you tick counts one. Tasks for it count when done outside those blocks.
         </p>
       ) : (
-        <Steps list={{ goalId: goal.id }} ordered={ordered} />
+        <Steps list={{ goalId: goal.id }} ordered={false} />
       )}
       <Recent goal={goal} logs={logs} today={today} />
       {editing && <GoalSheet goal={goal} onClose={() => setEditing(false)} onDeleted={() => navigate('/backlog')} />}
     </Page>
+  )
+}
+
+// A goal's projects, each with its number, then + Project (under this goal). Held-back ones say why.
+function Projects({ goal, today }: { goal: Goal; today: string }) {
+  const projects = useLiveQuery(() => db.projects.where('goalId').equals(goal.id).toArray(), [goal.id])
+  const all = useLiveQuery(() => db.projects.toArray())
+  const tasks = useLiveQuery(
+    () => db.tasks.where('goalId').equals(goal.id).filter((t) => t.status !== 'deleted').toArray(),
+    [goal.id],
+  )
+  const [adding, setAdding] = useState(false)
+  if (!projects || !all || !tasks) return null
+
+  return (
+    <section>
+      <h2 className="mb-2 text-sm font-semibold tracking-wide text-stone-500 uppercase">Projects</h2>
+      {projects.length > 0 && (
+        <ul className="divide-y divide-stone-100 rounded-xl bg-white">
+          {projects.map((p) => {
+            const steps = tasks.filter((t) => t.projectId === p.id)
+            const next = nextStep(steps)
+            const sub = isHeldBack(p, today)
+              ? heldBackLabel(p, all, tasks)
+              : p.manualOnly
+                ? 'Only when you add it'
+                : next && `Next: ${next.title}`
+            return (
+              <li key={p.id}>
+                <Link to={`/projects/${p.id}`} className="flex min-h-14 items-center gap-3 px-4 py-2 active:bg-stone-50">
+                  <span className="min-w-0 flex-1">
+                    <span className="block font-medium">{p.title}</span>
+                    {sub && <span className="block truncate text-sm text-stone-500">{sub}</span>}
+                  </span>
+                  <span className="shrink-0 tabular-nums text-stone-500">{projectNumber(p, tasks)}</span>
+                </Link>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+      <button type="button" className={`${secondaryBtn} mt-3 w-full`} onClick={() => setAdding(true)}>
+        + Project
+      </button>
+      {adding && <ProjectSheet goalId={goal.id} onClose={() => setAdding(false)} />}
+    </section>
   )
 }
 
@@ -135,7 +168,7 @@ export function ProjectScreen() {
   const { id = '' } = useParams()
   const navigate = useNavigate()
   const project = useLiveQuery(() => db.projects.get(id), [id])
-  const goal = useLiveQuery(async () => (project?.goalId ? db.goals.get(project.goalId) : undefined), [project?.goalId])
+  const goal = useLiveQuery(async () => (project ? db.goals.get(project.goalId) : undefined), [project?.goalId])
   const [editing, setEditing] = useState(false)
   if (project === undefined) return <Page title="" onEdit={() => {}} />
 
@@ -145,7 +178,7 @@ export function ProjectScreen() {
         {project.manualOnly ? 'Only when you add it' : 'Project'}
         {goal && (
           <>
-            {' · Feeds '}
+            {' · Under '}
             <Link to={`/goals/${goal.id}`} className="font-medium text-stone-900 underline underline-offset-2">
               {goal.title}
             </Link>

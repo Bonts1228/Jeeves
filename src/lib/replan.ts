@@ -15,7 +15,7 @@ export const ADDED_BY_YOU = 'Added by you'
 
 export interface ReplanInput {
   task: Task // the urgent task: estimate, area
-  anyArea: boolean // manual-only (Housekeeping): any area's block will do
+  anyArea: boolean // Housekeeping's own or manual-only: any area's block will do
   now: Date
   blocks: Block[] // today's blocks
   tasks: Task[] // today's tasks, any status

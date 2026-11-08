@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto'
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { Task } from '../types'
+import { HOUSEKEEPING_ID, type Task } from '../types'
 import { ensureBlocks, scheduleNewTask } from './blocks'
 import { BriefDB } from './db'
 import { addTask, updateTask } from './tasks'
@@ -13,6 +13,7 @@ const now = new Date(2026, 9, 15, 12)
 
 const task = (extra: Partial<Task>): Task => ({
   id: 't',
+  goalId: 'g-none', // no such goal row: not Housekeeping, so not manual-only
   title: 'Task',
   estimate: 30,
   areaId: 'area-focus',
@@ -109,33 +110,33 @@ describe('editing a repeat rule', () => {
   })
 })
 
-describe('inbox → task', () => {
+describe('every task has a home (M7)', () => {
   beforeEach(async () => {
-    await db.inbox.add({ id: 'in', text: 'Call the bank', createdAt: now.toISOString() })
+    await db.projects.add({ id: 'p', title: 'Job search setup', goalId: 'job' })
   })
 
-  it('removes the inbox item with the save', async () => {
-    await addTask(task({ id: 'bank', title: 'Call the bank' }), { db, inboxId: 'in' })
-    expect(await db.inbox.count()).toBe(0)
-    expect(await db.tasks.get('bank')).toBeDefined()
+  it('a project task takes its project’s goal; with neither it goes to Housekeeping', async () => {
+    await addTask(task({ id: 'cv', projectId: 'p', goalId: 'other' }), { db })
+    expect((await db.tasks.get('cv'))?.goalId).toBe('job')
+    await addTask(task({ id: 'bank', goalId: '' }), { db })
+    expect((await db.tasks.get('bank'))?.goalId).toBe(HOUSEKEEPING_ID)
+    expect(await scheduleNewTask(task({ id: 'post', projectId: 'p' }), FRI, { blockId: AM }, { now, db })).toBe(true)
+    expect((await db.tasks.get('post'))?.goalId).toBe('job')
   })
 
-  it('keeps the inbox item if the save fails', async () => {
-    await db.tasks.add(task({ id: 'bank' }))
-    await expect(addTask(task({ id: 'bank' }), { db, inboxId: 'in' })).rejects.toThrow() // duplicate id
-    expect(await db.inbox.get('in')).toBeDefined() // rolled back with the failed save
-    expect(await db.tasks.count()).toBe(1)
+  it('moving a task into or out of a project moves its goal', async () => {
+    await addTask(task({ id: 'x', goalId: 'course' }), { db })
+    await updateTask('x', { projectId: 'p' }, undefined, { now, db })
+    expect(await db.tasks.get('x')).toMatchObject({ goalId: 'job', projectId: 'p' })
+    await updateTask('x', { projectId: undefined, goalId: undefined }, undefined, { now, db })
+    const x = (await db.tasks.get('x'))!
+    expect(x.goalId).toBe(HOUSEKEEPING_ID)
+    expect(x.projectId).toBeUndefined()
+  })
 
-    await db.inbox.add({ id: 'in2', text: 'Post parcel', createdAt: now.toISOString() })
+  it('a schedule that no longer fits writes nothing', async () => {
     await db.tasks.add(scheduled('cv', AM, 240))
-    const placed = await scheduleNewTask(task({ id: 'post' }), FRI, { blockId: AM }, { now, db, inboxId: 'in2' })
-    expect(placed).toBe(false)
-    expect(await db.inbox.get('in2')).toBeDefined()
+    expect(await scheduleNewTask(task({ id: 'post' }), FRI, { blockId: AM }, { now, db })).toBe(false)
     expect(await db.tasks.get('post')).toBeUndefined()
-  })
-
-  it('a scheduled save removes the inbox item too', async () => {
-    expect(await scheduleNewTask(task({ id: 'bank' }), FRI, { blockId: AM }, { now, db, inboxId: 'in' })).toBe(true)
-    expect(await db.inbox.count()).toBe(0)
   })
 })

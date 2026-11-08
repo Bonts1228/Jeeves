@@ -4,13 +4,14 @@ import { nextWeekday } from '../lib/dates'
 import { nextDue } from '../lib/repeat'
 import type { Task } from '../types'
 import { BriefDB } from './db'
-import { completeTask, deleteTask, uncompleteTask } from './tasks'
+import { addTask, completeTask, deleteTask, uncompleteTask } from './tasks'
 
 // Local noon on an October 2026 day: 10 Sat, 13 Tue, 14 Wed, 17 Sat, 18 Sun, 25 Sun
 const oct = (day: number) => new Date(2026, 9, day, 12)
 
 const task = (extra: Partial<Task>): Task => ({
   id: 't1',
+  goalId: 'g-none', // no such goal row: not Housekeeping, so not manual-only
   title: 'Task',
   estimate: 30,
   areaId: 'area-focus',
@@ -134,12 +135,13 @@ describe('completeTask logging', () => {
     await db.open()
   })
 
-  it("logs against the task's goal, else its project's goal", async () => {
-    await db.projects.add({ id: 'p', title: 'Job search setup', areaId: 'area-focus', goalId: 'goal-job' })
-    await db.tasks.bulkAdd([task({ id: 'a', goalId: 'goal-x' }), task({ id: 'b', projectId: 'p' }), task({ id: 'c' })])
-    for (const id of ['a', 'b', 'c']) await completeTask(id, { now: oct(13), db })
+  it("logs against the task's goal; a project task's goal is its project's", async () => {
+    await db.projects.add({ id: 'p', title: 'Job search setup', goalId: 'goal-job' })
+    await addTask(task({ id: 'b', projectId: 'p' }), { db })
+    await db.tasks.add(task({ id: 'a', goalId: 'goal-x' }))
+    for (const id of ['a', 'b']) await completeTask(id, { now: oct(13), db })
     const goals = Object.fromEntries((await db.logEntries.toArray()).map((e) => [e.taskId, e.goalId]))
-    expect(goals).toEqual({ a: 'goal-x', b: 'goal-job', c: undefined })
+    expect(goals).toEqual({ a: 'goal-x', b: 'goal-job' })
   })
 
   it('stores detail fields and creates no next occurrence for a one-off task', async () => {

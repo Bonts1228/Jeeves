@@ -16,6 +16,7 @@ const block = (id: string, start: string, end: string, extra: Partial<Block> = {
 let n = 0
 const task = (id: string, estimate: number, extra: Partial<Task> = {}): Task => ({
   id,
+  goalId: 'g-none', // no such goal row: not Housekeeping, so not manual-only
   title: id,
   estimate,
   areaId: 'work',

@@ -31,6 +31,7 @@ const blocks = [eve, gym, lunch, am]
 let n = 0
 const task = (title: string, extra: Partial<Task> = {}): Task => ({
   id: title,
+  goalId: 'g-none', // no such goal row: not Housekeeping, so not manual-only
   title,
   estimate: 30,
   areaId: 'focus',
@@ -45,12 +46,13 @@ const task = (title: string, extra: Partial<Task> = {}): Task => ({
 
 const lifting: Goal = { id: 'lift', title: 'Lifting', type: 'recurring', areaId: 'gym', target: 5, period: 'week', servedByBlocks: true }
 const outreach: Goal = { id: 'out', title: 'Outreach', type: 'recurring', areaId: 'focus', target: 5, period: 'week' }
-const jeeves: Goal = { id: 'jeeves', title: 'Launch Jeeves', type: 'set_path', areaId: 'focus', deadline: '2026-12-31' }
+const jeeves: Goal = { id: 'jeeves', title: 'Build Jeeves', type: 'open_path', areaId: 'focus', deadline: '2026-12-31' }
+const launch: Project = { id: 'launch', title: 'Launch Jeeves', goalId: 'jeeves' }
 const job: Goal = { id: 'job', title: 'Secure a job', type: 'open_path', areaId: 'focus', deadline: '2026-11-30' }
-const setup: Project = { id: 'setup', title: 'Job search setup', areaId: 'focus', goalId: 'job' }
-const house: Project = { id: 'house', title: 'Housekeeping', areaId: 'focus', manualOnly: true }
+const setup: Project = { id: 'setup', title: 'Job search setup', goalId: 'job' }
+const house: Project = { id: 'house', title: 'Housekeeping', goalId: 'g-none', manualOnly: true }
 const goals = [lifting, outreach, jeeves, job]
-const projects = [setup, house]
+const projects = [setup, house, launch]
 const refs = { goals, projects }
 
 const ids = (ts: Task[]) => ts.map((t) => t.id)
@@ -62,9 +64,9 @@ describe('blockTasks', () => {
       task(title, { status: 'backlog', date: undefined, blockId: undefined, ...extra })
     const tasks = [
       backlog('loose old'),
-      backlog('jeeves step 2', { goalId: 'jeeves', order: 2 }),
-      backlog('jeeves step 1', { goalId: 'jeeves', order: 1 }),
-      backlog('setup step 1', { projectId: 'setup', order: 1 }),
+      backlog('jeeves step 2', { projectId: 'launch', goalId: 'jeeves', order: 2 }),
+      backlog('jeeves step 1', { projectId: 'launch', goalId: 'jeeves', order: 1 }),
+      backlog('setup step 1', { projectId: 'setup', goalId: 'job', order: 1 }),
       backlog('outreach'),
       backlog('due thu', { due: THU }),
       backlog('due wed', { due: '2026-10-14' }),
@@ -92,7 +94,7 @@ describe('blockTasks', () => {
       'outreach',
       'setup step 1', // Job search setup feeds a goal due 30 Nov, before Jeeves's 31 Dec
       'jeeves step 1',
-      'loose old',
+      'loose old', // jeeves step 2 would come next (rule 2.5) but the block is full
     ])
 
     // As saved by fillBrief, shuffled; done ones go after the open ones
@@ -104,10 +106,19 @@ describe('blockTasks', () => {
     expect(ids(blockTasks(placed, am, refs))).toEqual([...ranked.slice(1), 'left mon'])
   })
 
-  it('keeps steps of one path in their order and leaves other blocks and deleted tasks out', () => {
+  it("puts a later step the brief placed at rule 2.5 with the rest, not with next steps", () => {
     const tasks = [
-      task('step 3', { goalId: 'jeeves', order: 3 }),
-      task('step 2', { goalId: 'jeeves', order: 2 }),
+      task('loose', { reason: 'Waiting since 1 Oct' }),
+      task('step 2', { projectId: 'launch', goalId: 'jeeves', order: 2, reason: 'Launch Jeeves: step 2' }),
+      task('setup 1', { projectId: 'setup', goalId: 'job', order: 1, reason: 'Job search setup: next step' }),
+    ]
+    expect(ids(blockTasks(tasks, am, refs))).toEqual(['setup 1', 'loose', 'step 2'])
+  })
+
+  it('keeps steps of one project in their order and leaves other blocks and deleted tasks out', () => {
+    const tasks = [
+      task('step 3', { projectId: 'launch', goalId: 'jeeves', order: 3 }),
+      task('step 2', { projectId: 'launch', goalId: 'jeeves', order: 2 }),
       task('gone', { status: 'deleted' }),
       task('elsewhere', { blockId: 'eve' }),
     ]
@@ -184,11 +195,11 @@ describe('upNext', () => {
 })
 
 describe('blockGoal', () => {
-  it("is the block's served goal, else the current task's goal (or its project's)", () => {
+  it("is the block's served goal, else the current task's goal", () => {
     expect(blockGoal(gym, task('x', { goalId: 'jeeves' }), refs)).toBe(lifting)
     expect(blockGoal(am, task('x', { goalId: 'jeeves' }), refs)).toBe(jeeves)
-    expect(blockGoal(am, task('x', { projectId: 'setup' }), refs)).toBe(job)
-    expect(blockGoal(am, task('x', { projectId: 'house' }), refs)).toBeUndefined()
+    expect(blockGoal(am, task('x', { projectId: 'setup', goalId: 'job' }), refs)).toBe(job)
+    expect(blockGoal(am, task('x', { projectId: 'house' }), refs)).toBeUndefined() // its goal has no row
     expect(blockGoal(am, undefined, refs)).toBeUndefined()
   })
 })

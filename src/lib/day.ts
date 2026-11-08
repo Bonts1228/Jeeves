@@ -1,6 +1,6 @@
 import type { Block, Goal, ID, ISODate, LogEntry, Minutes, Project, Task } from '../types'
 import { blockTicked, servedGoal } from './block-goal'
-import { isCarriedReason, isOverdueReason } from './brief'
+import { isCarriedReason, isLaterStepReason, isOverdueReason, softOrder } from './brief'
 import { isoDate } from './dates'
 import { formatDuration, minutesOfDay, toMinutes } from './time'
 import { promptIds, unfinishedGroups } from './unfinished'
@@ -17,29 +17,28 @@ const isOpen = (t: Task) => t.status === 'scheduled'
 const oldestFirst = (a: Task, b: Task) => a.createdAt.localeCompare(b.createdAt)
 
 // A block's tasks (open and done) in the brief's rank order (lib/brief.ts rules 2.1–2.5), open first:
-// overdue, due (earliest first), recurring count goals, path steps (by path deadline, title, order),
-// then the rest oldest first. The brief doesn't store rank; this recomputes it from what it does store
-// (a placed overdue task is known by its reason).
+// overdue, due (earliest first), recurring count goals, project steps (by deadline, title, order),
+// then the rest oldest first (a project's later steps in their suggested order). The brief doesn't store
+// rank; this recomputes it from what it does store (a placed overdue task or later step is known by its reason).
 export function blockTasks(tasks: Task[], block: Block, { goals, projects }: Refs): Task[] {
   const goalById = new Map(goals.map((g) => [g.id, g]))
   const projectById = new Map(projects.map((p) => [p.id, p]))
   const countGoals = goals.filter((g) => g.type === 'recurring' && !g.servedByBlocks && g.target && g.period)
 
-  // The path a step belongs to, as rule 2.4 sorts paths: deadline, then title
+  // The project a step belongs to, as rule 2.4 sorts them: deadline, then title
   const path = (t: Task) => {
     const project = t.projectId ? projectById.get(t.projectId) : undefined
-    if (project && !project.manualOnly)
-      return { deadline: project.goalId ? goalById.get(project.goalId)?.deadline : undefined, title: project.title }
-    const goal = !t.projectId && t.goalId ? goalById.get(t.goalId) : undefined
-    if (goal?.type === 'set_path') return { deadline: goal.deadline, title: goal.title }
+    if (project && !project.manualOnly) return { deadline: goalById.get(project.goalId)?.deadline, title: project.title }
   }
   const tier = (t: Task) => {
     if (isOverdueReason(t.reason)) return 1
     if (t.due && t.due <= block.date) return 2
     if (!t.repeat && countGoals.some((g) => g.id === t.goalId)) return 3
-    if (path(t)) return 4
+    if (path(t) && !isLaterStepReason(t.reason)) return 4
     return 5
   }
+  const mine = tasks.filter((t) => t.blockId === block.id && (t.status === 'scheduled' || t.status === 'done'))
+  const soft = softOrder(mine)
   const compare = (a: Task, b: Task) => {
     const ta = tier(a)
     const tb = tier(b)
@@ -48,7 +47,7 @@ export function blockTasks(tasks: Task[], block: Block, { goals, projects }: Ref
     // today's carried ones, then oldest first
     if (ta === 1) return +isCarriedReason(a.reason) - +isCarriedReason(b.reason) || oldestFirst(a, b)
     if (ta === 2) return a.due!.localeCompare(b.due!) || oldestFirst(a, b)
-    if (ta === 3) return countGoals.findIndex((g) => g.id === a.goalId) - countGoals.findIndex((g) => g.id === b.goalId) || oldestFirst(a, b)
+    if (ta === 3) return countGoals.findIndex((g) => g.id === a.goalId) - countGoals.findIndex((g) => g.id === b.goalId) || soft(a, b)
     if (ta === 4) {
       const pa = path(a)!
       const pb = path(b)!
@@ -59,21 +58,19 @@ export function blockTasks(tasks: Task[], block: Block, { goals, projects }: Ref
         oldestFirst(a, b)
       )
     }
-    return oldestFirst(a, b)
+    return soft(a, b)
   }
 
-  const mine = tasks.filter((t) => t.blockId === block.id && (t.status === 'scheduled' || t.status === 'done'))
   return [...mine.filter(isOpen).sort(compare), ...mine.filter((t) => t.status === 'done').sort(compare)]
 }
 
 export { blockTicked, servedGoal }
 
 // The goal shown in a block's header: the one the block serves, else the current task's goal.
-export function blockGoal(block: Block, task: Task | undefined, { goals, projects }: Refs): Goal | undefined {
+export function blockGoal(block: Block, task: Task | undefined, { goals }: Refs): Goal | undefined {
   const served = servedGoal(block, goals)
   if (served || !task) return served
-  const goalId = task.goalId ?? projects.find((p) => p.id === task.projectId)?.goalId
-  return goals.find((g) => g.id === goalId)
+  return goals.find((g) => g.id === task.goalId)
 }
 
 export type TimeLeft = { state: 'before'; mins: Minutes } | { state: 'during'; mins: Minutes } | { state: 'after' }

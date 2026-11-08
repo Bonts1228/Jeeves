@@ -48,7 +48,7 @@ export function paceLabel(goal: Goal, logs: LogEntry[], now = new Date()): strin
   return [behind > 0 && `${behind} behind`, periodLeft(goal.period, now)].filter(Boolean).join(' · ')
 }
 
-// For goals with a target and period: { done, target }. Otherwise null (set paths count steps instead).
+// For goals with a target and period: { done, target }. Otherwise null.
 // Counts the whole current period, so a display clock a few seconds behind still counts a fresh tick.
 export function goalProgress(goal: Goal, logs: LogEntry[], now = new Date()) {
   if (!goal.target || !goal.period) return null
@@ -63,23 +63,20 @@ const byOrder = (a: Task, b: Task) => (a.order ?? Infinity) - (b.order ?? Infini
 
 // The one number on a goal's Backlog row (a number, never a colour). tasks: all non-deleted tasks.
 // A block-served goal counts log entries like any other: one per ticked block (db/day.ts), plus its tasks
-// done outside its blocks.
+// done outside its blocks. Housekeeping has no target: it counts what's open.
 export function goalNumber(goal: Goal, tasks: Task[], logs: LogEntry[], now = new Date()): string {
-  if (goal.type === 'set_path') {
-    const steps = tasks.filter((t) => t.goalId === goal.id && !t.projectId && t.status !== 'deleted')
-    return stepCount(steps)
-  }
+  if (goal.isHousekeeping) return `${tasks.filter((t) => t.goalId === goal.id && isOpen(t)).length} open`
   const progress = goalProgress(goal, logs, now)
   if (progress) return `${progress.done} of ${progress.target} this ${goal.period}`
   return `${logs.filter((l) => l.goalId === goal.id).length} done`
 }
 
-// Next open step of a set path or ordered project, if any.
+// Next open step of an ordered project, by suggested order, if any.
 export function nextStep(tasks: Task[]): Task | undefined {
   return tasks.filter(isOpen).sort(byOrder)[0]
 }
 
-// Ordered projects count steps; manual-only ones (Housekeeping) just count what's open.
+// Ordered projects count steps; manual-only ones just count what's open.
 export function projectNumber(project: Project, tasks: Task[]): string {
   const steps = tasks.filter((t) => t.projectId === project.id && t.status !== 'deleted')
   if (project.manualOnly) return `${steps.filter(isOpen).length} open`

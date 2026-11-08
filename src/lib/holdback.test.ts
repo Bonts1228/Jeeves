@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest'
 import type { Project, Task } from '../types'
 import { findWaitLoop, heldBackLabel, isHeldBack, waitCandidates } from './holdback'
 
-const project = (id: string, extra: Partial<Project> = {}): Project => ({ id, title: id.toUpperCase(), areaId: 'focus', ...extra })
+const project = (id: string, extra: Partial<Project> = {}): Project => ({ id, title: id.toUpperCase(), goalId: 'g-none', ...extra })
 const step = (projectId: string, extra: Partial<Task> = {}): Task => ({
   id: `${projectId}-${Math.random()}`,
+  goalId: 'g-none', // no such goal row: not Housekeeping, so not manual-only
   title: 'Step',
   estimate: 30,
   areaId: 'focus',

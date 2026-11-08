@@ -10,6 +10,7 @@ import {
   rollOver,
   skipBlockGoal,
 } from '../db/unfinished'
+import { isAnyAreaTask } from '../lib/brief'
 import { addDays, isoDate, weekdayOf } from '../lib/dates'
 import { useRefs } from '../lib/task-fields'
 import { formatDuration, WEEKDAY_SHORT } from '../lib/time'
@@ -67,7 +68,7 @@ export function UnfinishedSheet({
   const { next, sessions } = dests
 
   const areaName = (id: ID) => refs.areas.find((a) => a.id === id)?.name ?? 'Area'
-  const manual = (t: Task) => !!refs.projects.find((p) => p.id === t.projectId)?.manualOnly
+  const anyArea = (t: Task) => isAnyAreaTask(t, refs.projects)
   const where = (b: Block) => (b.date === today ? b.start : `${WEEKDAY_SHORT[weekdayOf(b.date)]} ${b.start}`)
 
   if (details.asking)
@@ -161,7 +162,7 @@ export function UnfinishedSheet({
                     </div>
                     {!dest && (
                       <p className="mt-1 text-xs text-stone-500">
-                        No {manual(t) ? '' : `${areaName(t.areaId)} `}block with {formatDuration(t.estimate)} free today or
+                        No {anyArea(t) ? '' : `${areaName(t.areaId)} `}block with {formatDuration(t.estimate)} free today or
                         tomorrow
                       </p>
                     )}

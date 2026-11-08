@@ -1,18 +1,23 @@
-import type { ID, Task } from '../types'
+import { HOUSEKEEPING_ID, type ID, type Task } from '../types'
 import { type BriefDB, db as defaultDb } from './db'
 
-// Step order. A set-path goal's tasks and a (non-manual) project's tasks are ordered lists:
-// every non-deleted step, done ones included, has order 1..n with no gaps or duplicates.
-// Anything else has no order. renumber() is the one place that enforces this; every change to a
+// Step order. A (non-manual) project's tasks are an ordered list: every non-deleted step, done ones
+// included, has order 1..n with no gaps or duplicates. The order is a suggestion, never a gate.
+// A goal's own tasks have no order. renumber() is the one place that enforces this; every change to a
 // list (add, move, delete, done, undo, type change) calls it in the same transaction.
 
 export type StepList = { projectId: ID } | { goalId: ID }
 
 // A task belongs to its project's list if it has one, else its goal's.
-export function stepListOf(task: Pick<Task, 'projectId' | 'goalId'>): StepList | null {
-  if (task.projectId) return { projectId: task.projectId }
-  if (task.goalId) return { goalId: task.goalId }
-  return null
+export function stepListOf(task: Pick<Task, 'projectId' | 'goalId'>): StepList {
+  return task.projectId ? { projectId: task.projectId } : { goalId: task.goalId }
+}
+
+// Every task has a home: its project's goal if it's in a project, else its goal, else Housekeeping.
+// Call inside a transaction on projects.
+export async function homeOf(db: BriefDB, task: Partial<Pick<Task, 'projectId' | 'goalId'>>): Promise<ID> {
+  const project = task.projectId ? await db.projects.get(task.projectId) : undefined
+  return project?.goalId ?? (task.goalId || HOUSEKEEPING_ID)
 }
 
 export const sameList = (a: StepList | null, b: StepList | null) => JSON.stringify(a) === JSON.stringify(b)
@@ -26,18 +31,15 @@ async function listTasks(db: BriefDB, list: StepList): Promise<Task[]> {
 }
 
 async function isOrdered(db: BriefDB, list: StepList): Promise<boolean> {
-  if ('projectId' in list) {
-    const project = await db.projects.get(list.projectId)
-    return !!project && !project.manualOnly
-  }
-  return (await db.goals.get(list.goalId))?.type === 'set_path'
+  if (!('projectId' in list)) return false
+  const project = await db.projects.get(list.projectId)
+  return !!project && !project.manualOnly
 }
 
 // Ordered: keep the current sequence, unordered tasks (new or moved in) last, oldest first; write 1..n.
 // Unordered: clear any order. Deleted tasks never hold an order. Call inside a transaction on
 // tasks, goals and projects.
-export async function renumber(db: BriefDB, list: StepList | null) {
-  if (!list) return
+export async function renumber(db: BriefDB, list: StepList) {
   const tasks = await listTasks(db, list)
   if (!(await isOrdered(db, list))) {
     for (const t of tasks) if (t.order !== undefined) await db.tasks.update(t.id, { order: undefined })

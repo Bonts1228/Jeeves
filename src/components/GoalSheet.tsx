@@ -8,17 +8,17 @@ import { Sheet } from './Sheet'
 import { dangerBtn, input, primaryBtn, secondaryBtn } from './ui'
 
 const TYPES: { type: GoalType; label: string; hint: string }[] = [
-  { type: 'set_path', label: 'Set path', hint: 'Ordered steps to a finish line.' },
-  { type: 'open_path', label: 'Open path', hint: 'Any number of tasks towards a target.' },
+  { type: 'open_path', label: 'Open path', hint: 'Projects and tasks towards an outcome, with a target if you like.' },
   { type: 'recurring', label: 'Recurring', hint: 'A habit counted each week or month.' },
 ]
 
 type Draft = Omit<Goal, 'id' | 'detailFields'> & { id?: string; detailFields: string }
 
+// Housekeeping, the system goal, only has a title and an area here: no type, target or delete.
 export function GoalSheet({ goal, onClose, onDeleted }: { goal?: Goal; onClose: () => void; onDeleted?: () => void }) {
   const areas = useLiveQuery(() => db.areas.toArray())
   const [draft, setDraft] = useState<Draft>(() => ({
-    ...(goal ?? { title: '', type: 'set_path' as const, areaId: '' }),
+    ...(goal ?? { title: '', type: 'open_path' as const, areaId: '' }),
     detailFields: goal?.detailFields?.join(', ') ?? '',
   }))
   const [deleting, setDeleting] = useState(false)
@@ -26,11 +26,10 @@ export function GoalSheet({ goal, onClose, onDeleted }: { goal?: Goal; onClose: 
 
   const set = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }))
   const areaId = draft.areaId || areas[0]?.id
-  const counted = draft.type !== 'set_path'
-  const valid = !!draft.title.trim() && !!areaId && (!counted || (draft.target ?? 0) > 0)
+  const system = !!goal?.isHousekeeping
+  // Recurring goals need a target; for an open path it's optional
+  const valid = !!draft.title.trim() && !!areaId && (draft.type !== 'recurring' || (draft.target ?? 0) > 0)
   const areaName = areas.find((a) => a.id === areaId)?.name ?? 'area'
-  const typeChanged = goal && goal.type !== draft.type
-  const fromOrdered = goal?.type === 'set_path'
 
   const save = async () => {
     if (!valid) return
@@ -43,10 +42,11 @@ export function GoalSheet({ goal, onClose, onDeleted }: { goal?: Goal; onClose: 
       title: draft.title.trim(),
       type: draft.type,
       areaId: areaId!,
-      ...(counted && { target: draft.target, period: draft.period ?? 'week' }),
+      ...(!system && draft.target && { target: draft.target, period: draft.period ?? 'week' }),
       ...(draft.deadline && { deadline: draft.deadline }),
       ...(draft.type === 'recurring' && draft.servedByBlocks && { servedByBlocks: true }),
       ...(fields.length && { detailFields: fields }),
+      ...(system && { isHousekeeping: true }),
     }
     await saveGoal(next)
     onClose()
@@ -74,7 +74,7 @@ export function GoalSheet({ goal, onClose, onDeleted }: { goal?: Goal; onClose: 
             <input className={input} value={draft.title} onChange={(e) => set({ title: e.target.value })} autoComplete="off" />
           </Field>
 
-          <div>
+          {!system && <div>
             <div role="group" aria-label="Type" className="grid grid-cols-3 gap-1">
               {TYPES.map(({ type, label }) => (
                 <button
@@ -91,12 +91,7 @@ export function GoalSheet({ goal, onClose, onDeleted }: { goal?: Goal; onClose: 
               ))}
             </div>
             <p className="mt-1 text-sm text-stone-500">{TYPES.find((t) => t.type === draft.type)?.hint}</p>
-            {typeChanged && (
-              <p className="mt-1 text-sm text-amber-700">
-                {fromOrdered ? 'Its steps lose their order.' : draft.type === 'set_path' ? 'Its tasks become steps, oldest first.' : ''}
-              </p>
-            )}
-          </div>
+          </div>}
 
           <Field label="Area">
             <select className={input} value={areaId} onChange={(e) => set({ areaId: e.target.value })}>
@@ -108,9 +103,9 @@ export function GoalSheet({ goal, onClose, onDeleted }: { goal?: Goal; onClose: 
             </select>
           </Field>
 
-          {counted && (
+          {!system && (
             <div className="grid grid-cols-2 gap-3">
-              <Field label="Target">
+              <Field label={draft.type === 'recurring' ? 'Target' : 'Target (optional)'}>
                 <input
                   type="number"
                   inputMode="numeric"
@@ -133,7 +128,7 @@ export function GoalSheet({ goal, onClose, onDeleted }: { goal?: Goal; onClose: 
             </div>
           )}
 
-          {draft.type === 'recurring' && (
+          {!system && draft.type === 'recurring' && (
             <label className="flex min-h-11 items-center gap-3">
               <input
                 type="checkbox"
@@ -148,16 +143,20 @@ export function GoalSheet({ goal, onClose, onDeleted }: { goal?: Goal; onClose: 
             </label>
           )}
 
-          <Field label="Deadline (optional)">
-            <input type="date" className={input} value={draft.deadline ?? ''} onChange={(e) => set({ deadline: e.target.value || undefined })} />
-          </Field>
+          {!system && (
+            <>
+              <Field label="Deadline (optional)">
+                <input type="date" className={input} value={draft.deadline ?? ''} onChange={(e) => set({ deadline: e.target.value || undefined })} />
+              </Field>
 
-          <Field label="Details to record when ticked (optional)" hint="Comma-separated, e.g. role, company">
-            <input className={input} value={draft.detailFields} onChange={(e) => set({ detailFields: e.target.value })} autoComplete="off" />
-          </Field>
+              <Field label="Details to record when ticked (optional)" hint="Comma-separated, e.g. role, company">
+                <input className={input} value={draft.detailFields} onChange={(e) => set({ detailFields: e.target.value })} autoComplete="off" />
+              </Field>
+            </>
+          )}
 
           <div className="flex gap-2 pt-2">
-            {goal && (
+            {goal && !system && (
               <button type="button" className={dangerBtn} onClick={() => setDeleting(true)}>
                 Delete
               </button>

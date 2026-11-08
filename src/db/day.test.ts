@@ -48,7 +48,7 @@ describe('block goal ticks', () => {
 
 describe('detail fields on tick', () => {
   const task = (id: string, extra: object) =>
-    db.tasks.add({ id, title: id, estimate: 30, areaId: 'area-focus', status: 'backlog', rollovers: 0, delegable: false, createdAt: now.toISOString(), ...extra })
+    db.tasks.add({ id, title: id, estimate: 30, areaId: 'area-focus', goalId: 'g-none', status: 'backlog', rollovers: 0, delegable: false, createdAt: now.toISOString(), ...extra })
 
   it('a block tick stores its details; Skip (none) still logs; untick takes them away', async () => {
     await tickBlock('gym', { details: { lift: 'Snatch', weight: '80kg' }, now, db })

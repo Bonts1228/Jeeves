@@ -9,6 +9,7 @@ import { completeTask, deleteTask, uncompleteTask, updateTask } from './tasks'
 const now = new Date(2026, 9, 15, 12)
 const task = (id: string, extra: Partial<Task> = {}): Task => ({
   id,
+  goalId: 'g-none', // no such goal row: not Housekeeping, so not manual-only
   title: id,
   estimate: 30,
   areaId: 'focus',
@@ -28,8 +29,8 @@ beforeEach(async () => {
   await db.open()
   await db.goals.add({ id: 'job', title: 'Job', type: 'open_path', areaId: 'focus' })
   await db.projects.bulkAdd([
-    { id: 'setup', title: 'Job setup', areaId: 'focus' },
-    { id: 'portfolio', title: 'Portfolio', areaId: 'focus', startsAfterProjectId: 'setup' },
+    { id: 'setup', title: 'Job setup', goalId: 'job' },
+    { id: 'portfolio', title: 'Portfolio', goalId: 'job', startsAfterProjectId: 'setup' },
   ])
   await db.tasks.bulkAdd([task('cv', { order: 1 }), task('linkedin', { order: 2 })])
 })
@@ -63,19 +64,20 @@ describe('startsAfterProjectId', () => {
     expect(await waiting()).toBeUndefined()
   })
 
-  it("clears when deleting a goal deletes the project's last open steps", async () => {
-    await db.tasks.bulkUpdate([
-      { key: 'cv', changes: { goalId: 'job' } },
-      { key: 'linkedin', changes: { goalId: 'job' } },
-    ])
+  it("stays when its project's goal is deleted: the project and its steps move to Housekeeping", async () => {
     await deleteGoalOrProject('goal', 'job', 'delete', db)
+    expect(await waiting()).toBe('setup')
+  })
+
+  it('clears when the project it waits on is deleted', async () => {
+    await deleteGoalOrProject('project', 'setup', 'delete', db)
     expect(await waiting()).toBeUndefined()
   })
 
   it('is not kept when saved against a project with nothing open', async () => {
-    await saveProject({ id: 'later', title: 'Later', areaId: 'focus', startsAfterProjectId: 'portfolio', notBefore: '2026-11-02' }, db)
-    expect(await db.projects.get('later')).toEqual({ id: 'later', title: 'Later', areaId: 'focus', notBefore: '2026-11-02' })
-    await saveProject({ id: 'later2', title: 'Later 2', areaId: 'focus', startsAfterProjectId: 'setup' }, db)
+    await saveProject({ id: 'later', title: 'Later', goalId: 'job', startsAfterProjectId: 'portfolio', notBefore: '2026-11-02' }, db)
+    expect(await db.projects.get('later')).toEqual({ id: 'later', title: 'Later', goalId: 'job', notBefore: '2026-11-02' })
+    await saveProject({ id: 'later2', title: 'Later 2', goalId: 'job', startsAfterProjectId: 'setup' }, db)
     expect((await db.projects.get('later2'))?.startsAfterProjectId).toBe('setup')
   })
 })

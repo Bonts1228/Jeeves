@@ -37,7 +37,7 @@ export function TaskSheet({ taskId, onClose }: { taskId: ID; onClose: () => void
   )
 }
 
-const linkOf = (t: Task): Link => (t.projectId ? { projectId: t.projectId } : t.goalId ? { goalId: t.goalId } : null)
+const linkOf = (t: Task): Link => (t.projectId ? { projectId: t.projectId } : { goalId: t.goalId })
 
 function EditForm({
   task,

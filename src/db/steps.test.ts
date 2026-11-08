@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { goalProgress } from '../lib/progress'
-import type { Goal, Task } from '../types'
+import { type Goal, HOUSEKEEPING_ID, type Task } from '../types'
 import { BriefDB } from './db'
 import { affectedBy, deleteGoalOrProject, saveGoal, saveProject } from './goals'
 import { moveStep, stepsOf } from './steps'
@@ -11,6 +11,7 @@ const now = new Date(2026, 9, 15, 12) // Thu 15 Oct 2026
 let seq = 0
 const task = (id: string, extra: Partial<Task> = {}): Task => ({
   id,
+  goalId: 'g-none', // no such goal row: not Housekeeping, so not manual-only
   title: id,
   estimate: 30,
   areaId: 'area-focus',
@@ -20,16 +21,17 @@ const task = (id: string, extra: Partial<Task> = {}): Task => ({
   createdAt: new Date(2026, 9, 1, 0, seq++).toISOString(),
   ...extra,
 })
-const setPath: Goal = { id: 'g', title: 'Launch', type: 'set_path', areaId: 'area-focus' }
+const launch: Goal = { id: 'g', title: 'Launch', type: 'open_path', areaId: 'area-focus' }
 
 let db: BriefDB
 beforeEach(async () => {
   db = new BriefDB(`test-${crypto.randomUUID()}`)
   await db.open()
-  await db.goals.put(setPath)
+  await db.goals.put(launch)
   await db.projects.bulkPut([
-    { id: 'p', title: 'Job search setup', areaId: 'area-focus', goalId: 'job' },
-    { id: 'house', title: 'Housekeeping', areaId: 'area-focus', manualOnly: true },
+    { id: 'p', title: 'Job search setup', goalId: 'job' },
+    { id: 'house', title: 'Housekeeping', goalId: 'g-none', manualOnly: true },
+    { id: 'p2', title: 'Launch steps', goalId: 'g' },
   ])
 })
 
@@ -85,42 +87,58 @@ describe('step order stays 1..n', () => {
     expect(await titles({ projectId: 'p' })).toEqual(['1:cv', '2:linkedin', '3:firms', '4:tracker', '5:outreach'])
   })
 
-  it('moving a step to another list closes the gap and puts it last there', async () => {
-    await addSteps({ goalId: 'g' }, ['spec', 'build'])
-    await updateTask('linkedin', { projectId: undefined, goalId: 'g' }, undefined, { now, db })
+  it('moving a step to another project closes the gap, puts it last there and takes that goal', async () => {
+    await addSteps({ projectId: 'p2' }, ['spec', 'build'])
+    await updateTask('linkedin', { projectId: 'p2' }, undefined, { now, db })
     expect(await titles({ projectId: 'p' })).toEqual(['1:cv', '2:firms', '3:tracker', '4:outreach'])
-    expect(await titles({ goalId: 'g' })).toEqual(['1:spec', '2:build', '3:linkedin'])
+    expect(await titles({ projectId: 'p2' })).toEqual(['1:spec', '2:build', '3:linkedin'])
+    expect((await db.tasks.get('linkedin'))?.goalId).toBe('g')
+  })
+
+  it('moving a step out to its goal leaves it unordered there', async () => {
+    await updateTask('linkedin', { projectId: undefined, goalId: 'job' }, undefined, { now, db })
+    expect(await titles({ projectId: 'p' })).toEqual(['1:cv', '2:firms', '3:tracker', '4:outreach'])
+    expect(await titles({ goalId: 'job' })).toEqual(['undefined:linkedin'])
   })
 
   it('manual-only projects have no order; toggling numbers or clears them', async () => {
     await addSteps({ projectId: 'house' }, ['laundry', 'shop'])
     expect((await stepsOf({ projectId: 'house' }, db)).map((t) => t.order)).toEqual([undefined, undefined])
-    await saveProject({ id: 'p', title: 'Job search setup', areaId: 'area-focus', manualOnly: true }, db)
+    await saveProject({ id: 'p', title: 'Job search setup', goalId: 'job', manualOnly: true }, db)
     expect((await stepsOf({ projectId: 'p' }, db)).every((t) => t.order === undefined)).toBe(true)
-    await saveProject({ id: 'house', title: 'Housekeeping', areaId: 'area-focus' }, db)
+    await saveProject({ id: 'house', title: 'Housekeeping', goalId: 'g-none' }, db)
     expect(await titles({ projectId: 'house' })).toEqual(['1:laundry', '2:shop'])
   })
 })
 
-describe('goal type change', () => {
-  beforeEach(() => addSteps({ goalId: 'g' }, ['a', 'b', 'c']))
-
-  it('set path → open path clears the order; back to set path numbers oldest first', async () => {
-    await moveStep('c', -1, db)
-    expect(await titles({ goalId: 'g' })).toEqual(['1:a', '2:c', '3:b'])
-    await saveGoal({ ...setPath, type: 'open_path', target: 5, period: 'week' }, db)
-    expect((await db.tasks.toArray()).map((t) => t.order)).toEqual([undefined, undefined, undefined])
-    await saveGoal(setPath, db)
-    expect(await titles({ goalId: 'g' })).toEqual(['1:a', '2:b', '3:c'])
+describe('saving a goal', () => {
+  it("a goal's own tasks have no order", async () => {
+    await addSteps({ goalId: 'g' }, ['a', 'b'])
+    expect((await db.tasks.toArray()).map((t) => t.order)).toEqual([undefined, undefined])
+    await moveStep('b', -1, db)
+    expect(await titles({ goalId: 'g' })).toEqual(['undefined:a', 'undefined:b'])
   })
 
-  it('becoming a set path drops target and period; servedByBlocks only stays on recurring', async () => {
-    await saveGoal({ ...setPath, type: 'recurring', target: 5, period: 'week', servedByBlocks: true }, db)
+  it('servedByBlocks only stays on recurring', async () => {
+    await saveGoal({ ...launch, type: 'recurring', target: 5, period: 'week', servedByBlocks: true }, db)
     expect(await db.goals.get('g')).toMatchObject({ servedByBlocks: true, target: 5 })
-    await saveGoal({ ...setPath, type: 'open_path', target: 5, period: 'week', servedByBlocks: true }, db)
+    await saveGoal({ ...launch, type: 'open_path', target: 5, period: 'week', servedByBlocks: true }, db)
     expect((await db.goals.get('g'))?.servedByBlocks).toBeUndefined()
-    await saveGoal({ ...setPath, target: 5, period: 'week' }, db)
-    expect(await db.goals.get('g')).toEqual(setPath)
+  })
+
+  it('Housekeeping stays the system goal: open path, no target', async () => {
+    const house: Goal = { id: HOUSEKEEPING_ID, title: 'Home admin', type: 'open_path', areaId: 'area-gym', isHousekeeping: true }
+    await saveGoal({ ...house, type: 'recurring', target: 3, period: 'week', isHousekeeping: undefined }, db)
+    expect(await db.goals.get(HOUSEKEEPING_ID)).toEqual(house)
+    await saveGoal({ ...launch, isHousekeeping: true }, db)
+    expect((await db.goals.get('g'))?.isHousekeeping).toBeUndefined()
+  })
+
+  it('moving a project to another goal takes its tasks along', async () => {
+    await addSteps({ projectId: 'p' }, ['cv', 'linkedin'])
+    await completeTask('cv', { now, db })
+    await saveProject({ id: 'p', title: 'Job search setup', goalId: 'g' }, db)
+    expect((await db.tasks.where('projectId').equals('p').toArray()).map((t) => t.goalId)).toEqual(['g', 'g'])
   })
 })
 
@@ -137,26 +155,43 @@ describe('deleting a goal or project', () => {
     expect(await affectedBy('goal', 'job', db)).toEqual({ open: 2, done: 0, projects: 1, waiting: 0 })
   })
 
-  it("'keep' leaves open tasks as loose Backlog tasks", async () => {
+  it("'keep' on a project leaves its tasks under the goal, unordered", async () => {
     await deleteGoalOrProject('project', 'p', 'keep', db)
     const tasks = await db.tasks.where('id').anyOf('cv', 'linkedin', 'firms').toArray()
-    expect(tasks.map((t) => [t.id, t.status, t.projectId, t.order])).toEqual([
-      ['cv', 'done', undefined, undefined],
-      ['firms', 'backlog', undefined, undefined],
-      ['linkedin', 'backlog', undefined, undefined],
+    expect(tasks.map((t) => [t.id, t.status, t.goalId, t.projectId, t.order])).toEqual([
+      ['cv', 'done', 'job', undefined, undefined],
+      ['firms', 'backlog', 'job', undefined, undefined],
+      ['linkedin', 'backlog', 'job', undefined, undefined],
     ])
     expect(await db.projects.get('p')).toBeUndefined()
   })
 
-  it("'delete' deletes open tasks, keeps done ones as history; feeding projects are unlinked", async () => {
+  it("'keep' on a goal moves its tasks and projects to Housekeeping", async () => {
+    await deleteGoalOrProject('goal', 'job', 'keep', db)
+    expect((await db.tasks.where('id').anyOf('app1', 'app2').toArray()).map((t) => [t.status, t.goalId])).toEqual([
+      ['backlog', HOUSEKEEPING_ID],
+      ['backlog', HOUSEKEEPING_ID],
+    ])
+    expect((await db.projects.get('p'))?.goalId).toBe(HOUSEKEEPING_ID)
+    expect(await titles({ projectId: 'p' })).toEqual(['1:cv✓', '2:linkedin', '3:firms']) // steps keep their order
+    expect((await db.tasks.where('projectId').equals('p').toArray()).every((t) => t.goalId === HOUSEKEEPING_ID)).toBe(true)
+  })
+
+  it("'delete' on a goal deletes its open tasks; history and log entries stay", async () => {
     const logs = await db.logEntries.toArray()
     await deleteGoalOrProject('goal', 'job', 'delete', db)
     expect((await db.tasks.where('id').anyOf('app1', 'app2').toArray()).map((t) => [t.status, t.goalId])).toEqual([
-      ['deleted', undefined],
-      ['deleted', undefined],
+      ['deleted', HOUSEKEEPING_ID],
+      ['deleted', HOUSEKEEPING_ID],
     ])
-    expect((await db.projects.get('p'))?.goalId).toBeUndefined()
+    expect((await db.tasks.get('linkedin'))?.status).toBe('backlog') // its project's steps move, not deleted
     expect(await db.logEntries.toArray()).toEqual(logs)
+  })
+
+  it('Housekeeping cannot be deleted', async () => {
+    await db.goals.put({ id: HOUSEKEEPING_ID, title: 'Housekeeping', type: 'open_path', areaId: 'area-focus', isHousekeeping: true })
+    await deleteGoalOrProject('goal', HOUSEKEEPING_ID, 'delete', db)
+    expect(await db.goals.get(HOUSEKEEPING_ID)).toBeDefined()
   })
 })
 

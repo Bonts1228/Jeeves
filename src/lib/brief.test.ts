@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { Block, Goal, LogEntry, Project, Settings, Task } from '../types'
+import { type Block, type Goal, HOUSEKEEPING_ID, type LogEntry, type Project, type Settings, type Task } from '../types'
 import { type BriefInput, buildBrief, rankCandidates } from './brief'
 
 // Brief for Thu 15 Oct 2026, built on Wed 14 Oct at 21:00.
@@ -26,6 +26,7 @@ const thuBlocks = [block('pm', '13:30', '16:30'), block('am', '08:00', '12:00'),
 let n = 0
 const task = (title: string, extra: Partial<Task> = {}): Task => ({
   id: title,
+  goalId: 'g-none', // no such goal row: not Housekeeping, so not manual-only
   title,
   estimate: 30,
   areaId: 'focus',
@@ -36,7 +37,7 @@ const task = (title: string, extra: Partial<Task> = {}): Task => ({
   ...extra,
 })
 
-const housekeeping: Project = { id: 'house', title: 'Housekeeping', areaId: 'focus', manualOnly: true }
+const housekeeping: Project = { id: 'house', title: 'Housekeeping', goalId: 'g-none', manualOnly: true }
 
 const input = (extra: Partial<BriefInput>): BriefInput => ({
   date: THU,
@@ -55,22 +56,26 @@ const placed = (i: BriefInput) => buildBrief(i).placements.map((p) => [p.task.id
 const reasons = (i: BriefInput) => rankCandidates(i).map((c) => [c.task.id, c.reason, c.tier])
 
 describe('rankCandidates', () => {
-  it('ranks overdue, then due, then next steps, then everything else', () => {
-    const goal: Goal = { id: 'g', title: 'Launch Jeeves', type: 'set_path', areaId: 'focus' }
+  it('ranks overdue, then due, then next steps, then everything else (later steps in their suggested order)', () => {
+    const goal: Goal = { id: 'g', title: 'Code', type: 'open_path', areaId: 'focus' }
+    const project: Project = { id: 'pj', title: 'Launch Jeeves', goalId: 'g' }
     const tasks = [
       task('old loose'),
-      task('step 2', { goalId: 'g', order: 2 }),
-      task('step 1', { goalId: 'g', order: 1 }),
+      task('step 3', { projectId: 'pj', goalId: 'g', order: 3 }),
+      task('step 2', { projectId: 'pj', goalId: 'g', order: 2 }),
+      task('step 1', { projectId: 'pj', goalId: 'g', order: 1 }),
       task('due thu', { due: THU }),
       task('left mon', { status: 'scheduled', date: '2026-10-12', blockId: 'x' }),
       task('left today', { status: 'scheduled', date: WED, blockId: 'y' }),
     ]
-    expect(reasons(input({ goals: [goal], tasks }))).toEqual([
+    expect(reasons(input({ goals: [goal], projects: [housekeeping, project], tasks }))).toEqual([
       ['left mon', 'Overdue from Mon', 1],
       ['left today', 'Carried from today', 1],
       ['due thu', 'Due Thu', 2],
       ['step 1', 'Launch Jeeves: next step', 4],
       ['old loose', 'Waiting since 1 Oct', 5],
+      ['step 2', 'Launch Jeeves: step 2', 5],
+      ['step 3', 'Launch Jeeves: step 3', 5],
     ])
   })
 
@@ -92,6 +97,8 @@ describe('rankCandidates', () => {
 
   it('shows the cadence of a due repeating task, and leaves repeating and manual-only tasks out otherwise', () => {
     const tasks = [
+      task('call bank', { goalId: HOUSEKEEPING_ID }),
+      task('post parcel', { goalId: HOUSEKEEPING_ID, due: THU }),
       task('meal plan', { projectId: 'house', due: THU, repeat: { kind: 'weekly', weekday: 4 } }),
       task('laundry', { projectId: 'house', due: '2026-10-13', repeat: { kind: 'every', days: 8 } }),
       task('later laundry', { due: '2026-10-20', repeat: { kind: 'every', days: 8 } }),
@@ -99,51 +106,72 @@ describe('rankCandidates', () => {
     ]
     expect(reasons(input({ tasks }))).toEqual([
       ['laundry', 'Due Tue · every 8 days', 2],
+      ['post parcel', 'Due Thu', 2], // older than meal plan, same day
       ['meal plan', 'Due Thu · weekly', 2],
+      ['call bank', 'Waiting since 1 Oct', 5], // Housekeeping's own tasks aren't manual-only
     ])
   })
 
   it('lists each task once, in its highest tier', () => {
-    const goal: Goal = { id: 'g', title: 'CFA', type: 'set_path', areaId: 'focus' }
-    const tasks = [task('unit 1', { goalId: 'g', order: 1, due: THU })]
-    expect(reasons(input({ goals: [goal], tasks }))).toEqual([['unit 1', 'Due Thu', 2]])
+    const cfa: Project = { id: 'cfa', title: 'CFA', goalId: 'g' }
+    const tasks = [task('unit 1', { projectId: 'cfa', order: 1, due: THU })]
+    expect(reasons(input({ projects: [cfa], tasks }))).toEqual([['unit 1', 'Due Thu', 2]])
   })
 
   it('takes the first step still in the Backlog: done and scheduled steps before it do not block it', () => {
-    const goal: Goal = { id: 'g', title: 'CFA', type: 'set_path', areaId: 'focus' }
-    const project: Project = { id: 'p', title: 'Job setup', areaId: 'focus', goalId: 'g2' }
+    const cfa: Project = { id: 'cfa', title: 'CFA', goalId: 'g' }
+    const project: Project = { id: 'p', title: 'Job setup', goalId: 'g2' }
     const tasks = [
-      task('u1', { goalId: 'g', order: 1, status: 'done' }),
-      task('u2', { goalId: 'g', order: 2, status: 'scheduled', date: WED, blockId: 'am' }),
-      task('u3', { goalId: 'g', order: 3 }),
-      task('u4', { goalId: 'g', order: 4 }),
+      task('u1', { projectId: 'cfa', order: 1, status: 'done' }),
+      task('u2', { projectId: 'cfa', order: 2, status: 'scheduled', date: WED, blockId: 'am' }),
+      task('u3', { projectId: 'cfa', order: 3 }),
+      task('u4', { projectId: 'cfa', order: 4 }),
       task('cv', { projectId: 'p', order: 1 }),
     ]
-    const goals: Goal[] = [goal, { id: 'g2', title: 'Job', type: 'open_path', areaId: 'focus', deadline: '2026-11-01' }]
+    const goals: Goal[] = [
+      { id: 'g', title: 'Course', type: 'open_path', areaId: 'focus' },
+      { id: 'g2', title: 'Job', type: 'open_path', areaId: 'focus', deadline: '2026-11-01' },
+    ]
     // Job setup inherits its goal's deadline, so it comes before CFA (no deadline)
-    expect(reasons(input({ goals, projects: [housekeeping, project], tasks }))).toEqual([
+    expect(reasons(input({ goals, projects: [housekeeping, cfa, project], tasks }))).toEqual([
       ['u2', 'Carried from today', 1],
       ['cv', 'Job setup: next step', 4],
       ['u3', 'CFA: next step', 4],
+      ['u4', 'CFA: step 4', 5],
     ])
   })
 
-  it('adds one step per path per day: a path with a step already on the date waits', () => {
-    const goal: Goal = { id: 'g', title: 'CFA', type: 'set_path', areaId: 'focus' }
+  it('adds one next step per project per day; later steps can still fill in at rule 2.5 (order never gates)', () => {
+    const cfa: Project = { id: 'cfa', title: 'CFA', goalId: 'g' }
     const tasks = [
-      task('u1', { goalId: 'g', order: 1, status: 'scheduled', date: THU, blockId: 'am' }),
-      task('u2', { goalId: 'g', order: 2 }),
+      task('u1', { projectId: 'cfa', order: 1, status: 'scheduled', date: THU, blockId: 'am' }),
+      task('u2', { projectId: 'cfa', order: 2 }),
     ]
-    expect(reasons(input({ goals: [goal], tasks }))).toEqual([])
+    expect(reasons(input({ projects: [cfa], tasks }))).toEqual([['u2', 'CFA: step 2', 5]])
+  })
+
+  it("counts a project's steps toward its goal's pace, in their suggested order", () => {
+    const goals: Goal[] = [{ id: 'r', title: 'CFA L1', type: 'recurring', areaId: 'focus', target: 5, period: 'week' }]
+    const units: Project = { id: 'units', title: 'CFA units', goalId: 'r' }
+    const tasks = [
+      task('quant', { projectId: 'units', goalId: 'r', order: 2 }),
+      task('ethics', { projectId: 'units', goalId: 'r', order: 1 }),
+      task('econ', { projectId: 'units', goalId: 'r', order: 3 }),
+    ]
+    expect(reasons(input({ goals, projects: [units], tasks })).slice(0, 3)).toEqual([
+      ['ethics', '5 left this week', 3],
+      ['quant', '5 left this week', 3],
+      ['econ', '5 left this week', 3],
+    ])
   })
 
   it('leaves held-back projects out of rules 2.3–2.5, but their due and overdue steps still rank', () => {
     const goals: Goal[] = [{ id: 'r', title: 'Run', type: 'recurring', areaId: 'focus', target: 7, period: 'week' }]
     const projects: Project[] = [
       housekeeping,
-      { id: 'wait', title: 'Portfolio', areaId: 'focus', startsAfterProjectId: 'other' },
-      { id: 'soon', title: 'Garden', areaId: 'focus', notBefore: '2026-10-16' },
-      { id: 'now', title: 'Shed', areaId: 'focus', notBefore: THU },
+      { id: 'wait', title: 'Portfolio', goalId: 'g-none', startsAfterProjectId: 'other' },
+      { id: 'soon', title: 'Garden', goalId: 'g-none', notBefore: '2026-10-16' },
+      { id: 'now', title: 'Shed', goalId: 'g-none', notBefore: THU },
     ]
     const tasks = [
       task('wait 1', { projectId: 'wait', order: 1 }),
@@ -244,10 +272,16 @@ describe('buildBrief', () => {
     expect(brief.notPlaced.map((p) => p.why)).toEqual(['No block with 5h free'])
   })
 
-  it('puts due manual-only tasks in the first block of any area with room', () => {
+  it("puts due manual-only tasks (Housekeeping's own, or a manual project's) in the first block of any area with room", () => {
     const blocks = [block('gym', '07:00', '08:00', { areaId: 'gym' }), ...thuBlocks]
-    const tasks = [task('laundry', { projectId: 'house', due: THU, estimate: 45 })]
-    expect(placed(input({ tasks, blocks }))).toEqual([['laundry', 'gym', 'Due Thu']])
+    const tasks = [
+      task('laundry', { projectId: 'house', due: THU, estimate: 45 }),
+      task('bins', { goalId: HOUSEKEEPING_ID, due: THU, estimate: 15 }),
+    ]
+    expect(placed(input({ tasks, blocks }))).toEqual([
+      ['laundry', 'gym', 'Due Thu'],
+      ['bins', 'gym', 'Due Thu'],
+    ])
   })
 
   it('counts what is already scheduled on the date, and never places into protected blocks', () => {

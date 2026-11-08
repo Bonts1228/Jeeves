@@ -41,6 +41,7 @@ const friGym = block('fri-gym', '17:00', '18:00', { date: FRI, areaId: 'gym' })
 let n = 0
 const task = (id: string, extra: Partial<Task> = {}): Task => ({
   id,
+  goalId: 'g-none', // no such goal row: not Housekeeping, so not manual-only
   title: id,
   estimate: 30,
   areaId: 'focus',

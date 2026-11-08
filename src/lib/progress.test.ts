@@ -33,10 +33,11 @@ describe('Backlog numbers', () => {
     expect(goalNumber(goal('goal-job'), seed.tasks, [justTicked, nextWeek], now)).toBe('1 of 20 this week')
   })
 
-  it('a set path counts its steps', () => {
-    const tasks: Task[] = seed.tasks.map((t) => (t.title.startsWith('M2') ? { ...t, status: 'done' } : t))
-    expect(goalNumber(goal('goal-jeeves'), tasks, [], now)).toBe('2 of 10 steps')
-    expect(nextStep(tasks.filter((t) => t.goalId === 'goal-jeeves'))?.title).toBe('M3 Brief (1/2)')
+  it('an open path with no target counts what is done; its projects count their steps', () => {
+    const tasks: Task[] = seed.tasks.map((t) => (t.title.startsWith('M7') ? { ...t, status: 'done' } : t))
+    expect(goalNumber(goal('goal-code'), tasks, [log('goal-code', 14)], now)).toBe('1 done')
+    expect(projectNumber(project('proj-jeeves'), tasks)).toBe('1 of 6 steps')
+    expect(nextStep(tasks.filter((t) => t.projectId === 'proj-jeeves'))?.title).toBe('M8 Capture')
   })
 
   it("an open path counts this period's log entries, including steps of projects that feed it", () => {
@@ -44,10 +45,11 @@ describe('Backlog numbers', () => {
     expect(goalNumber(goal('goal-job'), seed.tasks, logs, now)).toBe('2 of 20 this week')
   })
 
-  it('projects: ordered ones count steps, Housekeeping counts what is open', () => {
+  it('projects count steps (manual-only ones what is open); Housekeeping counts all its open tasks', () => {
     expect(projectNumber(project('proj-job-setup'), seed.tasks)).toBe('0 of 5 steps')
-    expect(projectNumber(project('proj-housekeeping'), seed.tasks)).toBe('5 open')
-    expect(goalNumber(goal('goal-trellis'), seed.tasks, [], now)).toBe('0 of 1 step')
+    expect(projectNumber(project('proj-trellis'), seed.tasks)).toBe('0 of 1 step')
+    expect(projectNumber({ ...project('proj-motorbike'), manualOnly: true }, seed.tasks)).toBe('4 open')
+    expect(goalNumber(goal('goal-housekeeping'), seed.tasks, [], now)).toBe('9 open') // 5 of its own + 4 motorbike steps
   })
 })
 
@@ -71,7 +73,7 @@ describe('pace', () => {
     expect(paceLabel(lifting, [log('goal-lifting', 13)], now)).toBe('2 behind · 4 days left')
     const three = [12, 13, 14].map((d) => log('goal-lifting', d))
     expect(paceLabel(lifting, three, now)).toBe('4 days left')
-    expect(paceLabel(goal('goal-jeeves'), [], now)).toBeNull() // set path: no target
+    expect(paceLabel(goal('goal-code'), [], now)).toBeNull() // no target
   })
 })
 
